@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-const API_BASE = 'https://medical-project-xuji.onrender.com';
+const API_BASE = 'http://localhost:4000';
 
 type SummaryResponse = {
     rangeDays: number;
