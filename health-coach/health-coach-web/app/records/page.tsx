@@ -14,7 +14,7 @@ import {
     Legend,
 } from 'recharts';
 
-const API_BASE = 'http://localhost:4000';
+const API_BASE = 'https://medical-project-xuji.onrender.com';
 
 type HealthRecord = {
     id: number;

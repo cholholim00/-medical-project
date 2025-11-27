@@ -19,7 +19,7 @@ type CoachResponse = {
     states: StateStat[];
 };
 
-const API_BASE = 'http://localhost:4000';
+const API_BASE = 'https://medical-project-xuji.onrender.com';
 
 export default function AiCoachPage() {
     const [data, setData] = useState<CoachResponse | null>(null);
