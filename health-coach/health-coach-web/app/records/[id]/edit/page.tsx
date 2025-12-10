@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
-const API_BASE = 'http://localhost:4000';
+const API_BASE = 'http://localhost:5001';
 
 type HealthRecord = {
     id: number;

@@ -1,82 +1,110 @@
 // src/server.ts
+console.log('🌟🌟🌟 BACKEND ENTRY FROM src/server.ts 🌟🌟🌟');
 import express from 'express';
 import cors from 'cors';
 
 import recordsRouter from './routes/records';
 import userRouter from './routes/user';
-import { prisma } from './lib/prisma';  // 🔹 추가: Prisma 직접 사용
+import aiRouter from './routes/ai';
+import { prisma } from './lib/prisma';
+
+console.log('🚀 health-coach backend STARTED (server.ts 로딩됨)');
 
 const app = express();
-const PORT = 4000;
-
-// 로그인 기능은 아직 없으니 고정 유저
+const PORT = 5001;
 const FIXED_USER_ID = 1;
 
 app.use(cors());
 app.use(express.json());
 
-// 헬스 체크
+// 🔹 0. 이 서버가 맞는지 확인용 라우트
+app.get('/__test', (req, res) => {
+    res.json({
+        ok: true,
+        msg: 'this is health-coach-backend on port 4000',
+        url: req.url,
+    });
+});
+
+// 🔹 1. 헬스 체크
 app.get('/health-check', (req, res) => {
     res.json({ status: 'ok', message: 'health-coach API is running' });
 });
 
-// 기록 관련 라우터
-app.use('/api/records', recordsRouter);
-
-// 사용자(목표 혈압) 관련 라우터
-app.use('/api/user', userRouter);
-
-// 🔥 여기서 직접 seed API 한 번 더 처리해주기
-// POST /api/records/dev/seed-bp
-app.post('/api/records/dev/seed-bp', async (req, res) => {
+// 🔹 2. summary 라우트
+app.get('/api/records/stats/summary', async (req, res) => {
     try {
-        const { days, perDay } = req.body as {
-            days?: number;
-            perDay?: number;
-        };
+        console.log('➡️  [server.ts] GET /api/records/stats/summary', req.query);
 
-        const totalDays = days && days > 0 ? days : 14;
-        const countPerDay = perDay && perDay > 0 ? perDay : 5;
+        const rangeParam = req.query.rangeDays as string | undefined;
+        const rangeDays = rangeParam ? parseInt(rangeParam, 10) : 7;
 
         const now = new Date();
-        const recordsToCreate: any[] = [];
+        const from = new Date(now.getTime() - rangeDays * 24 * 60 * 60 * 1000);
 
-        for (let d = 0; d < totalDays; d++) {
-            for (let i = 0; i < countPerDay; i++) {
-                const baseDate = new Date(now);
-                baseDate.setDate(now.getDate() - d);
-                baseDate.setHours(8 + i * 3); // 8시, 11시, 14시, 17시, 20시 등
+        const calcAvg = (nums: number[]): number | null => {
+            if (!nums.length) return null;
+            const sum = nums.reduce((acc, n) => acc + n, 0);
+            return sum / nums.length;
+        };
 
-                const sys = 120 + Math.round(Math.random() * 15) - 7; // 113~135
-                const dia = 80 + Math.round(Math.random() * 10) - 5;  // 75~90
-
-                recordsToCreate.push({
+        const [bpRecords, sugarRecords] = await Promise.all([
+            prisma.healthRecord.findMany({
+                where: {
                     userId: FIXED_USER_ID,
                     type: 'blood_pressure',
-                    datetime: baseDate,
-                    value1: sys,
-                    value2: dia,
-                    state: null,
-                    memo: null,
-                    sleepHours: null,
-                    exercise: null,
-                    stressLevel: null,
-                });
-            }
-        }
+                    datetime: { gte: from },
+                },
+            }),
+            prisma.healthRecord.findMany({
+                where: {
+                    userId: FIXED_USER_ID,
+                    type: 'blood_sugar',
+                    datetime: { gte: from },
+                },
+            }),
+        ]);
 
-        await prisma.healthRecord.createMany({
-            data: recordsToCreate,
-        });
+        const sysList = bpRecords.map((r) => r.value1);
+        const diaList = bpRecords
+            .map((r) => r.value2)
+            .filter((v): v is number => typeof v === 'number');
+
+        const sugarList = sugarRecords.map((r) => r.value1);
+
+        const avgSys = calcAvg(sysList);
+        const avgDia = calcAvg(diaList);
+        const avgSugar = calcAvg(sugarList);
 
         return res.json({
-            ok: true,
-            created: recordsToCreate.length,
+            rangeDays,
+            blood_pressure: {
+                count: bpRecords.length,
+                avg_sys: avgSys,
+                avg_dia: avgDia,
+            },
+            blood_sugar: {
+                count: sugarRecords.length,
+                avg: avgSugar,
+            },
         });
-    } catch (err) {
-        console.error('POST /api/records/dev/seed-bp (in server.ts) error', err);
-        return res.status(500).json({ error: 'internal server error' });
+    } catch (error) {
+        console.error('[server.ts] GET /api/records/stats/summary error', error);
+        return res
+            .status(500)
+            .json({ error: '혈압/혈당 요약 통계를 불러오는 중 오류가 발생했습니다.' });
     }
+});
+
+// 🔹 3. 나머지 라우터 연결 (V1 기능들)
+app.use('/api/records', recordsRouter);
+app.use('/api/user', userRouter);
+app.use('/api/ai', aiRouter);
+
+// (선택) 404 로깅
+app.use((req, _res, next) => {
+    console.log('⚠️  404 Not Found:', req.method, req.url);
+    next();
 });
 
 app.listen(PORT, () => {

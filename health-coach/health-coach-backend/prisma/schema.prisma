@@ -31,3 +31,25 @@ model UserProfile {
   targetDia Int   // 목표 이완기
 }
 
+model AiCoachLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  createdAt DateTime @default(now())
+
+  // 어떤 종류의 코칭인지
+  // 예: "coach" (개인 코치), "lifestyle" (라이프스타일 인사이트)
+  type      String
+
+  // 분석에 사용한 기간 (최근 7일, 14일, 30일 등)
+  rangeDays Int
+
+  // 사용자가 적은 메모 (AI 코치 /coach에서만 사용, lifestyle는 보통 null)
+  userNote  String?
+
+  // 나중에 필요하면 구분용 (예: "dashboard", "mobile" 같은)
+  source    String?
+
+  // 실제 AI가 응답한 텍스트 전체
+  aiMessage String
+}
+

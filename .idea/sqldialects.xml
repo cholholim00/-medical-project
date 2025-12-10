@@ -2,5 +2,7 @@
 <project version="4">
   <component name="SqlDialectMappings">
     <file url="file://$PROJECT_DIR$/.idea/queries/Query.sql" dialect="SQLite" />
+    <file url="file://$PROJECT_DIR$/health-coach/health-coach-backend/prisma/migrations/20251127071359_/migration.sql" dialect="SQLite" />
+    <file url="file://$PROJECT_DIR$/health-coach/health-coach-backend/prisma/migrations/20251210135205_add_ai_coach_log/migration.sql" dialect="SQLite" />
   </component>
 </project>

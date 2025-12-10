@@ -75,3 +75,14 @@ npx prisma migrate reset
 # y
 
 npm run dev   # 다시 서버 켜기
+
+# 프론트엔드용 스크립트
+powershell -ExecutionPolicy Bypass -File .\backend-dev.ps1
+1 → npm install
+2 → npx prisma migrate dev
+3 → npm run dev
+4 → 1+2+3 순서대로 자동 실행
+
+# 백엔드용 가장 편한 기본 실행 (메뉴 뜸)
+powershell -ExecutionPolicy Bypass -File .\web-dev.ps1
+

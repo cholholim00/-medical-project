@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-const API_BASE = 'http://localhost:4000'; // 나중에 배포 시 바꿀 예정
+const API_BASE = 'http://localhost:5001';
 
 type UserProfile = {
     id: number;
