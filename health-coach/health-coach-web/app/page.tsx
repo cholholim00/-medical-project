@@ -28,13 +28,16 @@ type HealthRecord = {
     state?: string | null;
     memo?: string | null;
 };
+type UserProfile = {
+    id: number;
+    userId: number;
+    targetSys: number;
+    targetDia: number;
+};
 
 type Level = 'normal' | 'elevated' | 'stage1' | 'stage2' | 'unknown';
 
-function classifyBloodPressure(
-    sys: number | null,
-    dia: number | null
-): Level {
+function classifyBloodPressure(sys: number | null, dia: number | null): Level {
     if (sys == null || dia == null) return 'unknown';
 
     if (sys < 120 && dia < 80) return 'normal';
@@ -81,6 +84,9 @@ export default function Home() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [seeding, setSeeding] = useState(false);
+    const [profile, setProfile] = useState<UserProfile | null>(null);
+    const [clearing, setClearing] = useState(false);
+
 
     const fetchData = async () => {
         try {
@@ -104,7 +110,7 @@ export default function Home() {
 
             const sorted = [...recordsJson].sort(
                 (a, b) =>
-                    new Date(b.datetime).getTime() - new Date(a.datetime).getTime()
+                    new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
             );
 
             setSummary(summaryJson);
@@ -144,6 +150,34 @@ export default function Home() {
         }
     };
 
+    const handleClearAll = async () => {
+        const ok = window.confirm(
+            '정말 모든 혈압 기록을 삭제할까요?\n(샘플 데이터뿐 아니라 지금까지 넣은 실제 기록도 모두 지워집니다.)',
+        );
+        if (!ok) return;
+
+        try {
+            setClearing(true);
+            setError(null);
+
+            const res = await fetch(`${API_BASE}/api/records/dev/clear-all`, {
+                method: 'DELETE',
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `clear API error: ${res.status}`);
+            }
+
+            // 삭제 후 데이터 다시 불러오기
+            await fetchData();
+        } catch (err: any) {
+            setError(err.message ?? '데이터 삭제 중 오류가 발생했습니다.');
+        } finally {
+            setClearing(false);
+        }
+    };
+
     useEffect(() => {
         fetchData();
     }, []);
@@ -170,8 +204,7 @@ export default function Home() {
                     <div className="flex flex-wrap gap-2">
                         <Link
                             href="/records/new"
-                            className="px-4 py-2 rounded-xl bg-emer
-ald-500 hover:bg-emerald-400 text-sm font-semibold"
+                            className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold"
                         >
                             ➕ 혈압 기록 추가하기
                         </Link>
@@ -187,22 +220,51 @@ ald-500 hover:bg-emerald-400 text-sm font-semibold"
                         >
                             📈 혈압 추이 차트
                         </Link>
+                        <Link
+                            href="/settings"
+                            className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-semibold"
+                        >
+                            🎯 목표 혈압 설정
+                        </Link>
+                        <Link
+                            href="/records"
+                            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm font-semibold"
+                        >
+                            📋 전체 기록 관리
+                        </Link>
+                        <Link
+                            href="/insights"
+                            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-sm font-semibold"
+                        >
+                            📊 라이프스타일 인사이트
+                        </Link>
                     </div>
                 </header>
 
                 {/* 샘플 생성 버튼 */}
                 <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <p className="text-sm text-slate-300">
-                        테스트용 데이터가 필요하면 아래 버튼으로 2주치 샘플 혈압 기록을 자동 생성할 수 있어.
+                        테스트용 데이터가 필요하면 샘플을 생성해서 그래프와 인사이트를 바로 확인할 수 있어요.
+                        필요하다면 아래에서 모든 기록을 한 번에 초기화할 수도 있어요.
                     </p>
-                    <button
-                        onClick={handleSeed}
-                        disabled={seeding}
-                        className="px-4 py-2 rounded-xl bg-purple-500 hover:bg-purple-400 text-sm font-semibold disabled:opacity-60"
-                    >
-                        {seeding ? '생성 중...' : '🧪 샘플 데이터 생성'}
-                    </button>
+                    <div className="flex flex-wrap gap-2 justify-end">
+                        <button
+                            onClick={handleSeed}
+                            disabled={seeding || clearing}
+                            className="px-4 py-2 rounded-xl bg-purple-500 hover:bg-purple-400 text-sm font-semibold disabled:opacity-60"
+                        >
+                            {seeding ? '생성 중...' : '🧪 샘플 데이터 생성'}
+                        </button>
+                        <button
+                            onClick={handleClearAll}
+                            disabled={clearing || seeding}
+                            className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-sm font-semibold disabled:opacity-60"
+                        >
+                            {clearing ? '삭제 중...' : '🧹 모든 기록 삭제'}
+                        </button>
+                    </div>
                 </section>
+
 
                 {loading && <p>불러오는 중...</p>}
                 {error && <p className="text-red-400 text-sm">에러: {error}</p>}
@@ -219,7 +281,7 @@ ald-500 hover:bg-emerald-400 text-sm font-semibold"
                                     <span className="text-xs text-slate-400">가장 최근 혈압</span>
                                     <span
                                         className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-medium ${levelColor(
-                                            latestLevel
+                                            latestLevel,
                                         )}`}
                                     >
                     {latest ? levelText(latestLevel) : '기록 없음'}
@@ -251,9 +313,9 @@ ald-500 hover:bg-emerald-400 text-sm font-semibold"
                                             {summary.blood_pressure.avg_sys !== null &&
                                             summary.blood_pressure.avg_dia !== null
                                                 ? `${Math.round(
-                                                    summary.blood_pressure.avg_sys
+                                                    summary.blood_pressure.avg_sys,
                                                 )} / ${Math.round(
-                                                    summary.blood_pressure.avg_dia
+                                                    summary.blood_pressure.avg_dia,
                                                 )} mmHg`
                                                 : '데이터 없음'}
                                         </div>
@@ -267,7 +329,9 @@ ald-500 hover:bg-emerald-400 text-sm font-semibold"
                                         </div>
                                         <div className="text-lg font-bold">
                                             {summary.blood_sugar.avg !== null
-                                                ? `${Math.round(summary.blood_sugar.avg)} mg/dL`
+                                                ? `${Math.round(
+                                                    summary.blood_sugar.avg,
+                                                )} mg/dL`
                                                 : '데이터 없음'}
                                         </div>
                                         <div className="text-xs text-slate-400">
@@ -319,13 +383,13 @@ ald-500 hover:bg-emerald-400 text-sm font-semibold"
                                         {records.map((r) => {
                                             const date = new Date(r.datetime);
                                             const dateStr = `${date.getFullYear()}-${String(
-                                                date.getMonth() + 1
+                                                date.getMonth() + 1,
                                             ).padStart(2, '0')}-${String(
-                                                date.getDate()
+                                                date.getDate(),
                                             ).padStart(2, '0')} ${String(
-                                                date.getHours()
+                                                date.getHours(),
                                             ).padStart(2, '0')}:${String(
-                                                date.getMinutes()
+                                                date.getMinutes(),
                                             ).padStart(2, '0')}`;
                                             return (
                                                 <tr key={r.id}>
@@ -334,7 +398,9 @@ ald-500 hover:bg-emerald-400 text-sm font-semibold"
                                                     </td>
                                                     <td className="border border-slate-800 px-2 py-1 text-center">
                                                         {r.value1}
-                                                        {r.value2 !== undefined ? ` / ${r.value2}` : ''}
+                                                        {r.value2 !== undefined
+                                                            ? ` / ${r.value2}`
+                                                            : ''}
                                                     </td>
                                                     <td className="border border-slate-800 px-2 py-1 text-center">
                                                         {r.state ?? '-'}

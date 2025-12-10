@@ -23,3 +23,11 @@ model HealthRecord {
 
   createdAt   DateTime @default(now())
 }
+
+model UserProfile {
+  id        Int @id @default(autoincrement())
+  userId    Int @unique
+  targetSys Int   // 목표 수축기
+  targetDia Int   // 목표 이완기
+}
+

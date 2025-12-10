@@ -1,0 +1,77 @@
+0. 루트폴더 구조 상기
+health-coach
+ ├─ health-coach-backend   # 백엔드 (Express + Prisma)
+ └─ health-coach-web       # 프론트 (Next.js)
+
+1. 백엔드 관련 명령어
+1-1. 백엔드 폴더로 이동
+cd Documents\GitHub\-medical-project\health-coach\health-coach-backend
+
+1-2. (처음 한 번) 의존성 설치
+npm install
+
+1-3. 개발 서버 실행
+npm run dev
+
+1-4. 확인: http://localhost:4000/health-check
+
+2. Prisma / DB 관련 명령어
+2-1. 스키마 바뀐 후 마이그레이션 생성
+prisma/schema.prisma 수정했을 때:
+npx prisma migrate dev --name add_user_profile   # 예시, 이름은 네가 정해도 됨
+
+2-2. DB 리셋하고 처음부터 (dev.db 초기화)
+개발용 데이터 전부 지우고 싶을 때:
+npx prisma migrate reset
+# 물어보면 y 입력
+그냥 이거 하나면:
+dev.db 드랍 + 다시 생성
+기존 migration 이력대로 테이블 구조 재구성
+
+2-3. Prisma Studio로 DB 직접 보기 (선택)
+npx prisma studio
+브라우저에서 테이블 데이터(HealthRecord, UserProfile) 확인/수정 가능.
+
+3. 프론트 (Next.js) 관련 명령어
+3-1. 프론트 폴더로 이동
+cd Documents\GitHub\-medical-project\health-coach\health-coach-web
+
+3-2. (처음 한 번) 의존성 설치
+npm install
+
+3-3. 개발 서버 실행
+npm run dev
+주요 페이지:
+/ → 대시보드
+/records/new → 혈압 기록 추가
+/charts → 혈압 추이 차트
+/ai-coach → AI 코치 요약
+/settings → 목표 혈압 설정
+
+4. 샘플 데이터 관련
+4-1. 샘플 혈압 데이터 생성 (2주치 × N개)
+백엔드 dev 서버가 켜져 있을 때, 브라우저나 Postman에서:
+POST http://localhost:4000/api/records/dev/seed-bp
+또는 대시보드의 버튼 사용:
+/ 페이지 → 🧪 샘플 데이터 생성 버튼 클릭
+
+5. “개발할 때 매번 하는 루틴” 요약
+🔹 하루 개발 시작할 때
+백엔드
+cd Documents\GitHub\-medical-project\health-coach\health-coach-backend
+npm run dev
+
+프론트
+cd Documents\GitHub\-medical-project\health-coach\health-coach-web
+npm run dev
+
+🔹 스키마 수정(예: UserProfile 추가) 후
+# 백엔드 폴더에서
+npx prisma migrate dev --name <적당한_이름>
+
+🔹 DB 싹 비우고 새로 테스트하고 싶을 때
+# 백엔드 폴더에서
+npx prisma migrate reset
+# y
+
+npm run dev   # 다시 서버 켜기

@@ -1,43 +1,106 @@
-// app/records/new/page.tsx
+// app/records/[id]/edit/page.tsx
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 
 const API_BASE = 'http://localhost:4000';
 
-export default function NewRecordPage() {
-    const router = useRouter();
+type HealthRecord = {
+    id: number;
+    datetime: string;
+    type: 'blood_pressure' | 'blood_sugar';
+    value1: number;
+    value2?: number | null;
+    pulse?: number | null;
+    state?: string | null;
+    memo?: string | null;
+    sleepHours?: number | null;
+    exercise?: boolean | null;
+    stressLevel?: number | null;
+};
 
-    const [datetime, setDatetime] = useState(
-        new Date().toISOString().slice(0, 16), // yyyy-MM-ddTHH:mm
-    );
-    const [sys, setSys] = useState(''); // 수축기
-    const [dia, setDia] = useState(''); // 이완기
-    const [pulse, setPulse] = useState(''); // 맥박(선택)
-    const [stateText, setStateText] = useState(''); // 상태 라벨
+export default function EditRecordPage() {
+    const params = useParams();
+    const router = useRouter();
+    const id = Number(params?.id);
+
+    const [initialLoading, setInitialLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+
+    const [datetime, setDatetime] = useState('');
+    const [sys, setSys] = useState('');
+    const [dia, setDia] = useState('');
+    const [pulse, setPulse] = useState('');
+    const [stateText, setStateText] = useState('');
     const [memo, setMemo] = useState('');
 
-    // 라이프스타일
-    const [sleepHours, setSleepHours] = useState(''); // 수면 시간(시간)
-    const [exercise, setExercise] = useState<'yes' | 'no' | ''>(''); // 운동 여부
-    const [stressLevel, setStressLevel] = useState('3'); // 1~5 기본 3
+    const [sleepHours, setSleepHours] = useState('');
+    const [exercise, setExercise] = useState<'yes' | 'no' | ''>('');
+    const [stressLevel, setStressLevel] = useState('3');
 
     const [submitting, setSubmitting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [submitError, setSubmitError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!id || Number.isNaN(id)) {
+            setLoadError('잘못된 id입니다.');
+            setInitialLoading(false);
+            return;
+        }
+
+        const fetchRecord = async () => {
+            try {
+                setInitialLoading(true);
+                setLoadError(null);
+
+                const res = await fetch(`${API_BASE}/api/records/${id}`);
+                if (!res.ok) {
+                    throw new Error(`API error: ${res.status}`);
+                }
+
+                const r = (await res.json()) as HealthRecord;
+
+                const d = new Date(r.datetime);
+                setDatetime(d.toISOString().slice(0, 16)); // yyyy-MM-ddTHH:mm
+                setSys(String(r.value1 ?? ''));
+                setDia(String(r.value2 ?? ''));
+                setPulse(r.pulse != null ? String(r.pulse) : '');
+                setStateText(r.state ?? '');
+                setMemo(r.memo ?? '');
+
+                setSleepHours(
+                    r.sleepHours != null ? String(r.sleepHours) : '',
+                );
+                setExercise(
+                    r.exercise == null ? '' : r.exercise ? 'yes' : 'no',
+                );
+                setStressLevel(
+                    r.stressLevel != null ? String(r.stressLevel) : '3',
+                );
+            } catch (err: any) {
+                setLoadError(err.message ?? '기록을 불러오는 중 오류가 발생했습니다.');
+            } finally {
+                setInitialLoading(false);
+            }
+        };
+
+        fetchRecord();
+    }, [id]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!id || Number.isNaN(id)) return;
 
         try {
             setSubmitting(true);
-            setError(null);
+            setSubmitError(null);
 
             const sysNum = Number(sys);
             const diaNum = Number(dia);
 
             if (Number.isNaN(sysNum) || Number.isNaN(diaNum)) {
-                setError('수축기/이완기 혈압을 숫자로 입력해 주세요.');
+                setSubmitError('수축기/이완기 혈압을 숫자로 입력해 주세요.');
                 setSubmitting(false);
                 return;
             }
@@ -64,7 +127,6 @@ export default function NewRecordPage() {
                 body.memo = memo.trim();
             }
 
-            // 라이프스타일 필드들 추가
             if (sleepHours.trim() !== '') {
                 const s = Number(sleepHours);
                 if (!Number.isNaN(s) && s > 0) {
@@ -85,8 +147,8 @@ export default function NewRecordPage() {
                 }
             }
 
-            const res = await fetch(`${API_BASE}/api/records`, {
-                method: 'POST',
+            const res = await fetch(`${API_BASE}/api/records/${id}`, {
+                method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                 },
@@ -98,26 +160,50 @@ export default function NewRecordPage() {
                 throw new Error(errJson.error || `API error: ${res.status}`);
             }
 
-            // 성공하면 메인 대시보드로 이동
-            router.push('/');
+            // 수정 완료 후 전체 기록 페이지로
+            router.push('/records');
         } catch (err: any) {
-            setError(err.message ?? '기록 저장 중 오류가 발생했습니다.');
+            setSubmitError(err.message ?? '기록 수정 중 오류가 발생했습니다.');
         } finally {
             setSubmitting(false);
         }
     };
 
+    if (initialLoading) {
+        return (
+            <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+                <p>기록을 불러오는 중...</p>
+            </main>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+                <div className="space-y-3 text-center">
+                    <p className="text-sm text-red-400">에러: {loadError}</p>
+                    <button
+                        onClick={() => router.push('/records')}
+                        className="text-sm text-slate-300 underline"
+                    >
+                        ← 기록 목록으로 돌아가기
+                    </button>
+                </div>
+            </main>
+        );
+    }
+
     return (
         <main className="min-h-screen bg-slate-950 text-slate-100 flex justify-center">
             <div className="w-full max-w-2xl p-6 space-y-6">
                 <header className="flex items-center justify-between">
-                    <h1 className="text-2xl font-bold">➕ 혈압 기록 추가</h1>
+                    <h1 className="text-2xl font-bold">✏️ 혈압 기록 수정</h1>
                     <button
                         type="button"
-                        onClick={() => router.push('/')}
+                        onClick={() => router.push('/records')}
                         className="text-sm text-slate-300 hover:text-slate-100 underline"
                     >
-                        ← 대시보드로 돌아가기
+                        ← 기록 목록으로
                     </button>
                 </header>
 
@@ -164,7 +250,9 @@ export default function NewRecordPage() {
                         {/* 선택 필드: 맥박, 상태, 메모 */}
                         <div className="grid gap-4 md:grid-cols-3">
                             <div className="space-y-2">
-                                <label className="block text-sm text-slate-300">맥박 (선택)</label>
+                                <label className="block text-sm text-slate-300">
+                                    맥박 (선택)
+                                </label>
                                 <input
                                     type="number"
                                     placeholder="예: 70"
@@ -202,7 +290,7 @@ export default function NewRecordPage() {
                         {/* 라이프스타일 섹션 */}
                         <div className="mt-4 border-t border-slate-800 pt-4 space-y-4">
                             <h2 className="text-sm font-semibold text-slate-200">
-                                라이프스타일 (선택 입력)
+                                라이프스타일
                             </h2>
 
                             <div className="grid gap-4 md:grid-cols-3">
@@ -271,25 +359,19 @@ export default function NewRecordPage() {
                                     </select>
                                 </div>
                             </div>
-
-                            <p className="text-[11px] text-slate-500">
-                                수면·운동·스트레스 정보는 AI 코치 요약 페이지에서 오늘 컨디션과
-                                혈압을 함께 설명해 줄 때 활용돼요. 모두 선택 입력이니, 부담 없이
-                                가능한 날에만 적어도 괜찮아요.
-                            </p>
                         </div>
 
                         {/* 에러 & 버튼 */}
-                        {error && (
+                        {submitError && (
                             <p className="text-sm text-red-400">
-                                에러: {error}
+                                에러: {submitError}
                             </p>
                         )}
 
                         <div className="flex justify-end gap-2 pt-2">
                             <button
                                 type="button"
-                                onClick={() => router.push('/')}
+                                onClick={() => router.push('/records')}
                                 className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-semibold"
                             >
                                 취소
@@ -299,7 +381,7 @@ export default function NewRecordPage() {
                                 disabled={submitting}
                                 className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold disabled:opacity-60"
                             >
-                                {submitting ? '저장 중...' : '기록 저장하기'}
+                                {submitting ? '수정 중...' : '변경 사항 저장'}
                             </button>
                         </div>
                     </form>

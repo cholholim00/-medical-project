@@ -11,6 +11,7 @@ import {
     Tooltip,
     Legend,
 } from 'recharts';
+import Link from 'next/link';
 
 const API_BASE = 'http://localhost:4000';
 
@@ -113,6 +114,12 @@ export default function ChartsPage() {
                             기간 동안의 혈압 변화를 시각화한 페이지야.
                         </p>
                     </div>
+                    <Link
+                        href="/"
+                        className="text-sm text-slate-300 hover:text-slate-100 underline"
+                    >
+                        ← 대시보드로
+                    </Link>
                 </header>
 
                 {/* 기간 선택 */}
