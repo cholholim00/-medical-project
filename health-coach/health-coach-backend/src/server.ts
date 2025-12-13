@@ -2,6 +2,7 @@
 console.log('🌟🌟🌟 BACKEND ENTRY FROM src/server.ts 🌟🌟🌟');
 import express from 'express';
 import cors from 'cors';
+import authRouter from './routes/auth';
 
 import recordsRouter from './routes/records';
 import userRouter from './routes/user';
@@ -16,12 +17,13 @@ const FIXED_USER_ID = 1;
 
 app.use(cors());
 app.use(express.json());
+app.use('/api/auth', authRouter);
 
 // 🔹 0. 이 서버가 맞는지 확인용 라우트
 app.get('/__test', (req, res) => {
     res.json({
         ok: true,
-        msg: 'this is health-coach-backend on port 4000',
+        msg: 'this is health-coach-backend on port 5001',
         url: req.url,
     });
 });

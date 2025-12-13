@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-const API_BASE = 'http://localhost:5001';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
 
 type UserProfile = {
     id: number;

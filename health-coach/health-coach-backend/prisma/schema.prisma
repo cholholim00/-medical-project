@@ -52,4 +52,11 @@ model AiCoachLog {
   // 실제 AI가 응답한 텍스트 전체
   aiMessage String
 }
-
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

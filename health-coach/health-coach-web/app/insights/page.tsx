@@ -3,35 +3,29 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { getToken } from '@/lib/authStorage';
 
-const API_BASE = 'http://localhost:5001'; // 👉 백엔드 포트에 맞게 조정 (4000이면 4000)
+const API_BASE =
+    process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:4000';
 
-type GroupStats = {
+type LifestyleGroup = {
+    label: string;
     count: number;
     avg_sys: number | null;
     avg_dia: number | null;
 };
 
-type LifestyleStats = {
+type LifestyleStatsResponse = {
     rangeDays: number;
-    sleep: {
-        short: GroupStats;
-        enough: GroupStats;
-    };
-    exercise: {
-        yes: GroupStats;
-        no: GroupStats;
-    };
-    stress: {
-        low: GroupStats;
-        mid: GroupStats;
-        high: GroupStats;
-    };
+    sleepGroups: LifestyleGroup[];
+    exerciseGroups: LifestyleGroup[];
+    stressGroups: LifestyleGroup[];
 };
 
 export default function InsightsPage() {
-    const [rangeDays, setRangeDays] = useState<14 | 30>(30);
-    const [stats, setStats] = useState<LifestyleStats | null>(null);
+    const [rangeDays, setRangeDays] = useState<30 | 60>(30);
+
+    const [stats, setStats] = useState<LifestyleStatsResponse | null>(null);
     const [loadingStats, setLoadingStats] = useState(true);
     const [statsError, setStatsError] = useState<string | null>(null);
 
@@ -39,320 +33,302 @@ export default function InsightsPage() {
     const [aiLoading, setAiLoading] = useState(false);
     const [aiError, setAiError] = useState<string | null>(null);
 
-    const fmt = (v: number | null) => (v === null ? '-' : Math.round(v));
+    const [needLogin, setNeedLogin] = useState(false);
 
-    const fetchStats = async (days: number) => {
+    // 🔹 라이프스타일 통계 불러오기 (토큰 필요)
+    const fetchStats = async (token: string, days: number) => {
         try {
             setLoadingStats(true);
             setStatsError(null);
 
             const res = await fetch(
                 `${API_BASE}/api/records/stats/lifestyle?rangeDays=${days}`,
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                },
             );
 
             if (!res.ok) {
-                throw new Error(`lifestyle API error: ${res.status}`);
+                const err = await res.json().catch(() => ({}));
+                throw new Error(
+                    err.error || `lifestyle stats API error: ${res.status}`,
+                );
             }
 
-            const json = (await res.json()) as LifestyleStats;
+            const json = (await res.json()) as LifestyleStatsResponse;
             setStats(json);
         } catch (err: any) {
-            setStatsError(err.message ?? '라이프스타일 통계를 불러오는 중 오류가 발생했습니다.');
-            setStats(null);
+            setStatsError(
+                err.message ?? '라이프스타일 인사이트 데이터를 불러오는 중 오류가 발생했습니다.',
+            );
         } finally {
             setLoadingStats(false);
         }
     };
 
+    // 🔹 첫 진입 / 기간 변경 시 토큰 확인 + 데이터 호출
     useEffect(() => {
-        fetchStats(rangeDays);
+        if (typeof window === 'undefined') return;
+
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setLoadingStats(false);
+            return;
+        }
+
+        fetchStats(token, rangeDays);
     }, [rangeDays]);
 
-    const handleAskAi = async () => {
+    // 🔹 AI 인사이트 요청
+    const handleAskInsight = async () => {
+        setAiError(null);
+        setAiMessage(null);
+
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setAiError('AI 인사이트를 사용하려면 로그인이 필요합니다.');
+            return;
+        }
+
         try {
             setAiLoading(true);
-            setAiError(null);
-            setAiMessage(null);
 
             const res = await fetch(`${API_BASE}/api/ai/lifestyle`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ rangeDays }),
             });
 
             if (!res.ok) {
-                const errJson = await res.json().catch(() => ({}));
-                throw new Error(errJson.error || `AI lifestyle API error: ${res.status}`);
+                const err = await res.json().catch(() => ({}));
+                throw new Error(
+                    err.error || `AI lifestyle API error: ${res.status}`,
+                );
             }
 
-            const json = await res.json();
-            setAiMessage(json.message ?? '');
+            const json = (await res.json()) as {
+                aiMessage?: string;
+                message?: string;
+            };
+
+            setAiMessage(json.aiMessage ?? json.message ?? '(응답 본문 없음)');
         } catch (err: any) {
             setAiError(
-                err.message ?? 'AI 라이프스타일 인사이트를 불러오는 중 오류가 발생했습니다.',
+                err.message ?? 'AI 인사이트 요청 중 오류가 발생했습니다.',
             );
         } finally {
             setAiLoading(false);
         }
     };
 
+    // 공통 테이블 렌더링 컴포넌트
+    const renderGroupTable = (title: string, groups: LifestyleGroup[]) => {
+        if (!groups || groups.length === 0) {
+            return (
+                <p className="text-sm text-slate-400">
+                    해당 항목에 대한 데이터가 아직 없습니다.
+                </p>
+            );
+        }
+
+        return (
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                    <thead>
+                    <tr className="bg-slate-800">
+                        <th className="border border-slate-700 px-2 py-1 text-left">
+                            {title}
+                        </th>
+                        <th className="border border-slate-700 px-2 py-1">측정 횟수</th>
+                        <th className="border border-slate-700 px-2 py-1">
+                            평균 혈압 (수축기 / 이완기)
+                        </th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {groups.map((g) => (
+                        <tr key={g.label}>
+                            <td className="border border-slate-800 px-2 py-1 whitespace-nowrap">
+                                {g.label}
+                            </td>
+                            <td className="border border-slate-800 px-2 py-1 text-center">
+                                {g.count}회
+                            </td>
+                            <td className="border border-slate-800 px-2 py-1 text-center">
+                                {g.avg_sys !== null && g.avg_dia !== null
+                                    ? `${Math.round(g.avg_sys)} / ${Math.round(g.avg_dia)} mmHg`
+                                    : '데이터 없음'}
+                            </td>
+                        </tr>
+                    ))}
+                    </tbody>
+                </table>
+            </div>
+        );
+    };
+
     return (
         <main className="min-h-screen bg-slate-950 text-slate-100 flex justify-center">
-            <div className="w-full max-w-5xl p-6 space-y-6">
+            <div className="w-full max-w-4xl p-6 space-y-6">
                 {/* 헤더 */}
                 <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                         <h1 className="text-2xl font-bold">📊 라이프스타일 인사이트</h1>
                         <p className="text-sm text-slate-300">
-                            수면, 운동, 스트레스와 혈압 사이의 패턴을 숫자로 보고,
-                            AI 코치의 해석까지 한 번에 확인할 수 있는 페이지야.
+                            수면, 운동, 스트레스 패턴에 따라 혈압이 어떻게 달라지는지 확인할 수 있어요.
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <Link
                             href="/"
-                            className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-semibold"
+                            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold"
                         >
-                            🏠 대시보드로 돌아가기
-                        </Link>
-                        <Link
-                            href="/ai-coach"
-                            className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-sm font-semibold"
-                        >
-                            🤖 AI 혈압 코치
+                            ⬅ 대시보드로
                         </Link>
                     </div>
                 </header>
 
-                {/* 기간 선택 + AI 버튼 */}
-                <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <div className="space-y-1">
-                        <p className="text-sm text-slate-200 font-semibold">
-                            분석 기간
+                {/* 로그인 필요 안내 */}
+                {needLogin && (
+                    <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+                        <p className="text-sm text-slate-300">
+                            이 페이지는 내 기록을 기반으로 인사이트를 보여주기 때문에 로그인이 필요해요.
                         </p>
-                        <p className="text-xs text-slate-400">
-                            기간을 바꾸면 같은 기준으로 다시 통계를 계산해서 보여줘.
-                        </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2 items-center">
-                        <select
-                            value={rangeDays}
-                            onChange={(e) =>
-                                setRangeDays(Number(e.target.value) as 14 | 30)
-                            }
-                            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1 text-sm"
-                        >
-                            <option value={14}>최근 14일</option>
-                            <option value={30}>최근 30일</option>
-                        </select>
-                        <button
-                            onClick={handleAskAi}
-                            disabled={aiLoading}
-                            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-sm font-semibold disabled:opacity-60"
-                        >
-                            {aiLoading ? 'AI 분석 중...' : '🧠 AI 인사이트 받기'}
-                        </button>
-                    </div>
-                </section>
-
-                {/* 통계 테이블 */}
-                <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
-                    <h2 className="font-semibold text-sm mb-1">
-                        수면 / 운동 / 스트레스별 평균 혈압
-                    </h2>
-
-                    {loadingStats && (
-                        <p className="text-sm text-slate-400">통계를 불러오는 중...</p>
-                    )}
-                    {statsError && (
-                        <p className="text-sm text-red-400">에러: {statsError}</p>
-                    )}
-
-                    {!loadingStats && !statsError && stats && (
-                        <div className="space-y-4 text-sm">
-                            {/* 수면 */}
-                            <div>
-                                <h3 className="font-semibold text-slate-200 mb-1">
-                                    😴 수면 시간
-                                </h3>
-                                <table className="w-full text-xs border-collapse">
-                                    <thead>
-                                    <tr className="bg-slate-800">
-                                        <th className="border border-slate-700 px-2 py-1 text-left">
-                                            그룹
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            측정 횟수
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            평균 혈압
-                                        </th>
-                                    </tr>
-                                    </thead>
-                                    <tbody>
-                                    <tr>
-                                        <td className="border border-slate-800 px-2 py-1">
-                                            6시간 미만
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {stats.sleep.short.count}
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {fmt(stats.sleep.short.avg_sys)} /{' '}
-                                            {fmt(stats.sleep.short.avg_dia)} mmHg
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td className="border border-slate-800 px-2 py-1">
-                                            6시간 이상
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {stats.sleep.enough.count}
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {fmt(stats.sleep.enough.avg_sys)} /{' '}
-                                            {fmt(stats.sleep.enough.avg_dia)} mmHg
-                                        </td>
-                                    </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            {/* 운동 */}
-                            <div>
-                                <h3 className="font-semibold text-slate-200 mb-1">
-                                    🏃‍♀️ 운동 여부
-                                </h3>
-                                <table className="w-full text-xs border-collapse">
-                                    <thead>
-                                    <tr className="bg-slate-800">
-                                        <th className="border border-slate-700 px-2 py-1 text-left">
-                                            그룹
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            측정 횟수
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            평균 혈압
-                                        </th>
-                                    </tr>
-                                    </thead>
-                                    <tbody>
-                                    <tr>
-                                        <td className="border border-slate-800 px-2 py-1">
-                                            운동한 날
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {stats.exercise.yes.count}
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {fmt(stats.exercise.yes.avg_sys)} /{' '}
-                                            {fmt(stats.exercise.yes.avg_dia)} mmHg
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td className="border border-slate-800 px-2 py-1">
-                                            운동 안 한 날
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {stats.exercise.no.count}
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {fmt(stats.exercise.no.avg_sys)} /{' '}
-                                            {fmt(stats.exercise.no.avg_dia)} mmHg
-                                        </td>
-                                    </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            {/* 스트레스 */}
-                            <div>
-                                <h3 className="font-semibold text-slate-200 mb-1">
-                                    😵‍💫 스트레스 수준
-                                </h3>
-                                <table className="w-full text-xs border-collapse">
-                                    <thead>
-                                    <tr className="bg-slate-800">
-                                        <th className="border border-slate-700 px-2 py-1 text-left">
-                                            그룹
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            측정 횟수
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            평균 혈압
-                                        </th>
-                                    </tr>
-                                    </thead>
-                                    <tbody>
-                                    <tr>
-                                        <td className="border border-slate-800 px-2 py-1">
-                                            낮음 (1~2)
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {stats.stress.low.count}
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {fmt(stats.stress.low.avg_sys)} /{' '}
-                                            {fmt(stats.stress.low.avg_dia)} mmHg
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td className="border border-slate-800 px-2 py-1">
-                                            중간 (3)
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {stats.stress.mid.count}
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {fmt(stats.stress.mid.avg_sys)} /{' '}
-                                            {fmt(stats.stress.mid.avg_dia)} mmHg
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <td className="border border-slate-800 px-2 py-1">
-                                            높음 (4~5)
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {stats.stress.high.count}
-                                        </td>
-                                        <td className="border border-slate-800 px-2 py-1 text-center">
-                                            {fmt(stats.stress.high.avg_sys)} /{' '}
-                                            {fmt(stats.stress.high.avg_dia)} mmHg
-                                        </td>
-                                    </tr>
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            <p className="text-[11px] text-slate-500">
-                                ※ 통계는 기록된 데이터만 기준으로 계산되며, 표본 수가 적으면
-                                실제 경향과 다를 수 있어요.
-                            </p>
+                        <div className="flex flex-wrap gap-2">
+                            <Link
+                                href="/auth/login"
+                                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-semibold"
+                            >
+                                로그인 하러 가기
+                            </Link>
+                            <Link
+                                href="/auth/register"
+                                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-xs font-semibold"
+                            >
+                                회원가입
+                            </Link>
                         </div>
-                    )}
-                </section>
-
-                {/* AI 인사이트 카드 */}
-                {aiError && (
-                    <p className="text-sm text-red-400">에러: {aiError}</p>
-                )}
-                {aiMessage && (
-                    <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                        <h2 className="font-semibold text-sm text-slate-100">
-                            🧠 AI 라이프스타일 인사이트
-                        </h2>
-                        <p className="text-sm whitespace-pre-line text-slate-200">
-                            {aiMessage}
-                        </p>
-                        <p className="text-[11px] text-slate-500">
-                            ※ 이 인사이트는 데이터 기반 참고용 조언이며, 의료적 진단이나 치료
-                            지시가 아닙니다. 걱정되는 수치나 증상이 지속된다면 반드시 의료 전문가와 상담하세요.
-                        </p>
+                        {statsError && (
+                            <p className="text-xs text-red-400 whitespace-pre-line">
+                                {statsError}
+                            </p>
+                        )}
                     </section>
+                )}
+
+                {/* 로그인 되어 있을 때만 본문 표시 */}
+                {!needLogin && (
+                    <>
+                        {/* 기간 선택 + 요약 */}
+                        <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                <div className="text-sm text-slate-300">
+                                    최근 일정 기간 동안의 수면/운동/스트레스 패턴과 혈압 관계를 분석해요.
+                                </div>
+                                <div className="flex items-center gap-2 text-sm">
+                                    <span className="text-slate-300">분석 기간:</span>
+                                    <select
+                                        value={rangeDays}
+                                        onChange={(e) =>
+                                            setRangeDays(Number(e.target.value) as 30 | 60)
+                                        }
+                                        className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1 text-sm"
+                                    >
+                                        <option value={30}>최근 30일</option>
+                                        <option value={60}>최근 60일</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {loadingStats && (
+                                <p className="text-sm text-slate-400">통계를 불러오는 중...</p>
+                            )}
+                            {statsError && (
+                                <p className="text-sm text-red-400 whitespace-pre-line">
+                                    {statsError}
+                                </p>
+                            )}
+                            {!loadingStats && !statsError && !stats && (
+                                <p className="text-sm text-slate-400">
+                                    아직 라이프스타일 데이터가 없습니다. 기록 추가 후 다시 확인해 주세요.
+                                </p>
+                            )}
+                        </section>
+
+                        {/* 통계 테이블들 */}
+                        {stats && (
+                            <section className="space-y-4">
+                                {/* 수면 */}
+                                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                                    <h2 className="font-semibold">😴 수면 시간 vs 혈압</h2>
+                                    <p className="text-xs text-slate-400">
+                                        예: 6시간 미만 / 6시간 이상 그룹으로 나눠서 혈압 차이를 봅니다.
+                                    </p>
+                                    {renderGroupTable('수면 그룹', stats.sleepGroups)}
+                                </div>
+
+                                {/* 운동 */}
+                                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                                    <h2 className="font-semibold">🏃 운동 여부 vs 혈압</h2>
+                                    <p className="text-xs text-slate-400">
+                                        운동한 날과 운동하지 않은 날의 평균 혈압 차이를 비교합니다.
+                                    </p>
+                                    {renderGroupTable('운동 여부', stats.exerciseGroups)}
+                                </div>
+
+                                {/* 스트레스 */}
+                                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                                    <h2 className="font-semibold">🧠 스트레스 수준 vs 혈압</h2>
+                                    <p className="text-xs text-slate-400">
+                                        스트레스 지수(1~5)를 낮음/중간/높음으로 나누어 혈압 경향을 봅니다.
+                                    </p>
+                                    {renderGroupTable('스트레스 수준', stats.stressGroups)}
+                                </div>
+                            </section>
+                        )}
+
+                        {/* AI 인사이트 섹션 */}
+                        <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                                <h2 className="font-semibold">🧠 AI 라이프스타일 인사이트</h2>
+                                <button
+                                    type="button"
+                                    onClick={handleAskInsight}
+                                    disabled={aiLoading || loadingStats || !!statsError}
+                                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-semibold disabled:opacity-60"
+                                >
+                                    {aiLoading
+                                        ? 'AI가 분석 중...'
+                                        : 'AI에게 패턴 분석 요청하기'}
+                                </button>
+                            </div>
+
+                            {aiError && (
+                                <p className="text-sm text-red-400 whitespace-pre-line">
+                                    {aiError}
+                                </p>
+                            )}
+
+                            {aiMessage && (
+                                <div className="mt-2 p-4 rounded-xl bg-slate-950 border border-slate-800 text-sm whitespace-pre-line">
+                                    {aiMessage}
+                                </div>
+                            )}
+
+                            <p className="mt-2 text-[11px] text-slate-500">
+                                ※ 이 코멘트는 생활 습관 참고용으로 제공되며, 의료적 진단이나 치료 지시가
+                                아닙니다. 걱정되는 수치가 계속된다면 반드시 의료 전문가와 상담하세요.
+                            </p>
+                        </section>
+                    </>
                 )}
             </div>
         </main>

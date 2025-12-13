@@ -1,10 +1,11 @@
 // app/page.tsx
 'use client';
-
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { getToken, getUser, clearAuth } from '@/lib/authStorage'; // 🔹 수정
 
-const API_BASE = 'http://localhost:5001';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
 
 type SummaryResponse = {
     rangeDays: number;
@@ -28,6 +29,7 @@ type HealthRecord = {
     state?: string | null;
     memo?: string | null;
 };
+
 type UserProfile = {
     id: number;
     userId: number;
@@ -86,16 +88,45 @@ export default function Home() {
     const [seeding, setSeeding] = useState(false);
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [clearing, setClearing] = useState(false);
+    const [needLogin, setNeedLogin] = useState(false);
+    const [user, setUser] = useState<ReturnType<typeof getUser>>(null); // 🔹 추가
+    const router = useRouter();
 
+    const handleLogout = () => {
+        if (typeof window === 'undefined') return;
 
-    const fetchData = async () => {
+        // 로그인 정보 삭제
+        localStorage.removeItem('hc_token');
+        localStorage.removeItem('hc_user');
+
+        // 대시보드 상태 리셋
+        setSummary(null);
+        setRecords([]);
+        setNeedLogin(true);
+
+        // 로그인 페이지로 이동
+        router.push('/auth/login');
+    };
+
+    // 🔹 토큰을 인자로 받아서 데이터 로딩
+    const fetchData = async (token: string) => {
         try {
             setLoading(true);
             setError(null);
 
             const [summaryRes, recordsRes] = await Promise.all([
-                fetch(`${API_BASE}/api/records/stats/summary?rangeDays=7`),
-                fetch(`${API_BASE}/api/records?type=blood_pressure`),
+                fetch(`${API_BASE}/api/records/stats/summary?rangeDays=7`, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                }),
+                fetch(`${API_BASE}/api/records?type=blood_pressure`, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                }),
             ]);
 
             if (!summaryRes.ok) {
@@ -120,9 +151,25 @@ export default function Home() {
         } finally {
             setLoading(false);
         }
+        const handleLogout = () => {
+            clearAuth();
+            setUser(null);
+            setSummary(null);
+            setRecords([]);
+            setNeedLogin(true);
+            setError(null);
+        };
     };
 
+    // 🔹 샘플 데이터 생성 (로그인 필요)
     const handleSeed = async () => {
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setError('샘플 데이터를 생성하려면 먼저 로그인해야 합니다.');
+            return;
+        }
+
         try {
             setSeeding(true);
             setError(null);
@@ -130,6 +177,7 @@ export default function Home() {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({
                     days: 14,
@@ -142,7 +190,7 @@ export default function Home() {
                 throw new Error(err.error || `seed API error: ${res.status}`);
             }
 
-            await fetchData();
+            await fetchData(token);
         } catch (err: any) {
             setError(err.message ?? '샘플 데이터 생성 중 오류');
         } finally {
@@ -150,7 +198,15 @@ export default function Home() {
         }
     };
 
+    // 🔹 전체 삭제 (로그인 필요)
     const handleClearAll = async () => {
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setError('모든 기록을 삭제하려면 먼저 로그인해야 합니다.');
+            return;
+        }
+
         const ok = window.confirm(
             '정말 모든 혈압 기록을 삭제할까요?\n(샘플 데이터뿐 아니라 지금까지 넣은 실제 기록도 모두 지워집니다.)',
         );
@@ -162,6 +218,9 @@ export default function Home() {
 
             const res = await fetch(`${API_BASE}/api/records/dev/clear-all`, {
                 method: 'DELETE',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
             });
 
             if (!res.ok) {
@@ -169,8 +228,7 @@ export default function Home() {
                 throw new Error(err.error || `clear API error: ${res.status}`);
             }
 
-            // 삭제 후 데이터 다시 불러오기
-            await fetchData();
+            await fetchData(token);
         } catch (err: any) {
             setError(err.message ?? '데이터 삭제 중 오류가 발생했습니다.');
         } finally {
@@ -178,9 +236,25 @@ export default function Home() {
         }
     };
 
+    // 🔹 마운트 시 토큰 확인 → 없으면 로그인 안내, 있으면 데이터 로딩
     useEffect(() => {
-        fetchData();
+        if (typeof window === 'undefined') return;
+
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setLoading(false);
+            return;
+        }
+
+        const u = getUser();
+        if (u) {
+            setUser(u);
+        }
+
+        fetchData(token);
     }, []);
+
 
     const latest = records.length > 0 ? records[0] : null;
     const latestSys =
@@ -201,51 +275,83 @@ export default function Home() {
                             백엔드에서 계산한 통계를 한눈에 보고, 기록도 바로 추가할 수 있어.
                         </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                        <Link
-                            href="/records/new"
-                            className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold"
-                        >
-                            ➕ 혈압 기록 추가하기
-                        </Link>
-                        <Link
-                            href="/ai-coach"
-                            className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-sm font-semibold"
-                        >
-                            🤖 AI 코치 요약 보기
-                        </Link>
-                        <Link
-                            href="/charts"
-                            className="px-4 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-sm font-semibold"
-                        >
-                            📈 혈압 추이 차트
-                        </Link>
-                        <Link
-                            href="/settings"
-                            className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-semibold"
-                        >
-                            🎯 목표 혈압 설정
-                        </Link>
-                        <Link
-                            href="/records"
-                            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm font-semibold"
-                        >
-                            📋 전체 기록 관리
-                        </Link>
-                        <Link
-                            href="/insights"
-                            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-sm font-semibold"
-                        >
-                            📊 라이프스타일 인사이트
-                        </Link>
+                    <div className="flex flex-col items-end gap-2">
+                        {/* 로그인 상태 표시 영역 */}
+                        <div className="text-xs text-slate-300 flex items-center gap-2">
+                            {user ? (
+                                <>
+          <span>
+            {user.name ?? user.email} 님, 환영해요 👋
+          </span>
+                                    <button
+                                        onClick={handleLogout}
+                                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-[11px] font-semibold"
+                                    >
+                                        로그아웃
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <span>로그인이 필요합니다.</span>
+                                    <Link
+                                        href="/auth/login"
+                                        className="px-2 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-[11px] font-semibold"
+                                    >
+                                        로그인
+                                    </Link>
+                                </>
+                            )}
+                        </div>
+
+                        {/* 기존 버튼들 */}
+                        <div className="flex flex-wrap gap-2">
+                            <Link
+                                href="/records/new"
+                                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold"
+                            >
+                                ➕ 혈압 기록 추가하기
+                            </Link>
+                            <Link
+                                href="/ai-coach"
+                                className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-sm font-semibold"
+                            >
+                                🤖 AI 코치 요약 보기
+                            </Link>
+                            <Link
+                                href="/charts"
+                                className="px-4 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-sm font-semibold"
+                            >
+                                📈 혈압 추이 차트
+                            </Link>
+                            <Link
+                                href="/settings"
+                                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-semibold"
+                            >
+                                🎯 목표 혈압 설정
+                            </Link>
+                            <Link
+                                href="/records"
+                                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm font-semibold"
+                            >
+                                📋 전체 기록 관리
+                            </Link>
+                            <Link
+                                href="/insights"
+                                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-sm font-semibold"
+                            >
+                                📊 라이프스타일 인사이트
+                            </Link>
+                        </div>
                     </div>
                 </header>
 
-                {/* 샘플 생성 버튼 */}
+
+                {/* 샘플 생성 / 전체 삭제 섹션 */}
                 <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <p className="text-sm text-slate-300">
-                        테스트용 데이터가 필요하면 샘플을 생성해서 그래프와 인사이트를 바로 확인할 수 있어요.
-                        필요하다면 아래에서 모든 기록을 한 번에 초기화할 수도 있어요.
+                        테스트용 데이터가 필요하면 샘플을 생성해서 그래프와 인사이트를 바로
+                        확인할 수 있어요. 필요하다면 아래에서 모든 기록을 한 번에
+                        초기화할 수도 있어요.
                     </p>
                     <div className="flex flex-wrap gap-2 justify-end">
                         <button
@@ -265,158 +371,188 @@ export default function Home() {
                     </div>
                 </section>
 
+                {/* 🔹 여기서부터: 로그인 여부에 따라 다르게 렌더링 */}
+                {needLogin ? (
+                    // 로그인 안 되어 있을 때: 로그인 안내 카드
+                    <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+                        <p className="text-sm text-slate-300">
+                            이 대시보드는 로그인 후에만 볼 수 있어요.
+                        </p>
+                        <div className="mt-3 flex gap-2">
+                            <Link
+                                href="/auth/login"
+                                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold"
+                            >
+                                로그인 하기
+                            </Link>
+                            <Link
+                                href="/auth/register"
+                                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-semibold"
+                            >
+                                회원가입
+                            </Link>
+                        </div>
+                    </section>
+                ) : (
+                    // 로그인 되어 있을 때: 기존 로딩/에러/대시보드 UI
+                    <>
+                        {loading && <p>불러오는 중...</p>}
+                        {error && <p className="text-red-400 text-sm">에러: {error}</p>}
 
-                {loading && <p>불러오는 중...</p>}
-                {error && <p className="text-red-400 text-sm">에러: {error}</p>}
+                        {!loading && !error && (
+                            <div className="grid md:grid-cols-3 gap-4">
+                                {/* 왼쪽: 최근 상태 + 평균 */}
+                                <section className="md:col-span-1 p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+                                    <h2 className="font-semibold mb-1">최근 7일 요약</h2>
 
-                {!loading && !error && (
-                    <div className="grid md:grid-cols-3 gap-4">
-                        {/* 왼쪽: 최근 상태 + 평균 */}
-                        <section className="md:col-span-1 p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-                            <h2 className="font-semibold mb-1">최근 7일 요약</h2>
+                                    {/* 최근 측정값 카드 */}
+                                    <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                                        <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-400">
+                        가장 최근 혈압
+                      </span>
+                                            <span
+                                                className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-medium ${levelColor(
+                                                    latestLevel,
+                                                )}`}
+                                            >
+                        {latest ? levelText(latestLevel) : '기록 없음'}
+                      </span>
+                                        </div>
+                                        <div className="text-lg font-bold">
+                                            {latestSys !== null && latestDia !== null
+                                                ? `${latestSys} / ${latestDia} mmHg`
+                                                : '기록 없음'}
+                                        </div>
+                                        {latest && (
+                                            <p className="text-xs text-slate-400">
+                                                상태:{' '}
+                                                <span className="font-medium text-slate-200">
+                          {latest.state ?? '표시 없음'}
+                        </span>
+                                            </p>
+                                        )}
+                                    </div>
 
-                            {/* 최근 측정값 카드 */}
-                            <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-xs text-slate-400">가장 최근 혈압</span>
-                                    <span
-                                        className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-medium ${levelColor(
-                                            latestLevel,
-                                        )}`}
-                                    >
-                    {latest ? levelText(latestLevel) : '기록 없음'}
-                  </span>
-                                </div>
-                                <div className="text-lg font-bold">
-                                    {latestSys !== null && latestDia !== null
-                                        ? `${latestSys} / ${latestDia} mmHg`
-                                        : '기록 없음'}
-                                </div>
-                                {latest && (
-                                    <p className="text-xs text-slate-400">
-                                        상태:{' '}
-                                        <span className="font-medium text-slate-200">
-                      {latest.state ?? '표시 없음'}
-                    </span>
+                                    {/* 평균 요약 */}
+                                    {summary ? (
+                                        <div className="text-sm text-slate-300 space-y-3">
+                                            <div>
+                                                <div className="text-xs text-slate-400 mb-1">
+                                                    최근 7일 평균 혈압
+                                                </div>
+                                                <div className="text-lg font-bold">
+                                                    {summary.blood_pressure.avg_sys !== null &&
+                                                    summary.blood_pressure.avg_dia !== null
+                                                        ? `${Math.round(
+                                                            summary.blood_pressure.avg_sys,
+                                                        )} / ${Math.round(
+                                                            summary.blood_pressure.avg_dia,
+                                                        )} mmHg`
+                                                        : '데이터 없음'}
+                                                </div>
+                                                <div className="text-xs text-slate-400">
+                                                    측정 횟수: {summary.blood_pressure.count}회
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div className="text-xs text-slate-400 mb-1">
+                                                    최근 7일 평균 혈당
+                                                </div>
+                                                <div className="text-lg font-bold">
+                                                    {summary.blood_sugar.avg !== null
+                                                        ? `${Math.round(
+                                                            summary.blood_sugar.avg,
+                                                        )} mg/dL`
+                                                        : '데이터 없음'}
+                                                </div>
+                                                <div className="text-xs text-slate-400">
+                                                    측정 횟수: {summary.blood_sugar.count}회
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-slate-400">
+                                            아직 통계 데이터가 없습니다.
+                                        </p>
+                                    )}
+
+                                    <p className="text-[11px] text-slate-500">
+                                        ※ 이 분류는 일반적인 혈압 범위를 참고한 것이며, 의료적
+                                        진단이나 치료 지시가 아닙니다. 걱정되는 수치가 계속된다면
+                                        의료 전문가와 상담하세요.
                                     </p>
-                                )}
-                            </div>
+                                </section>
 
-                            {/* 평균 요약 */}
-                            {summary ? (
-                                <div className="text-sm text-slate-300 space-y-3">
-                                    <div>
-                                        <div className="text-xs text-slate-400 mb-1">
-                                            최근 7일 평균 혈압
-                                        </div>
-                                        <div className="text-lg font-bold">
-                                            {summary.blood_pressure.avg_sys !== null &&
-                                            summary.blood_pressure.avg_dia !== null
-                                                ? `${Math.round(
-                                                    summary.blood_pressure.avg_sys,
-                                                )} / ${Math.round(
-                                                    summary.blood_pressure.avg_dia,
-                                                )} mmHg`
-                                                : '데이터 없음'}
-                                        </div>
-                                        <div className="text-xs text-slate-400">
-                                            측정 횟수: {summary.blood_pressure.count}회
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div className="text-xs text-slate-400 mb-1">
-                                            최근 7일 평균 혈당
-                                        </div>
-                                        <div className="text-lg font-bold">
-                                            {summary.blood_sugar.avg !== null
-                                                ? `${Math.round(
-                                                    summary.blood_sugar.avg,
-                                                )} mg/dL`
-                                                : '데이터 없음'}
-                                        </div>
-                                        <div className="text-xs text-slate-400">
-                                            측정 횟수: {summary.blood_sugar.count}회
-                                        </div>
-                                    </div>
-                                </div>
-                            ) : (
-                                <p className="text-sm text-slate-400">
-                                    아직 통계 데이터가 없습니다.
-                                </p>
-                            )}
-
-                            <p className="text-[11px] text-slate-500">
-                                ※ 이 분류는 일반적인 혈압 범위를 참고한 것이며, 의료적 진단이나
-                                치료 지시가 아닙니다. 걱정되는 수치가 계속된다면 의료 전문가와
-                                상담하세요.
-                            </p>
-                        </section>
-
-                        {/* 오른쪽: 최근 기록 리스트 */}
-                        <section className="md:col-span-2 p-4 rounded-xl bg-slate-900 border border-slate-800">
-                            <h2 className="font-semibold mb-2">최근 혈압 기록 (최대 10개)</h2>
-                            {records.length === 0 ? (
-                                <p className="text-sm text-slate-400">
-                                    아직 혈압 기록이 없어요. 위의 &quot;혈압 기록 추가하기&quot; 버튼을
-                                    눌러서 첫 기록을 추가해보세요.
-                                </p>
-                            ) : (
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm border-collapse">
-                                        <thead>
-                                        <tr className="bg-slate-800">
-                                            <th className="border border-slate-700 px-2 py-1 text-left">
-                                                날짜/시간
-                                            </th>
-                                            <th className="border border-slate-700 px-2 py-1">
-                                                혈압
-                                            </th>
-                                            <th className="border border-slate-700 px-2 py-1">
-                                                상태
-                                            </th>
-                                            <th className="border border-slate-700 px-2 py-1">
-                                                메모
-                                            </th>
-                                        </tr>
-                                        </thead>
-                                        <tbody>
-                                        {records.map((r) => {
-                                            const date = new Date(r.datetime);
-                                            const dateStr = `${date.getFullYear()}-${String(
-                                                date.getMonth() + 1,
-                                            ).padStart(2, '0')}-${String(
-                                                date.getDate(),
-                                            ).padStart(2, '0')} ${String(
-                                                date.getHours(),
-                                            ).padStart(2, '0')}:${String(
-                                                date.getMinutes(),
-                                            ).padStart(2, '0')}`;
-                                            return (
-                                                <tr key={r.id}>
-                                                    <td className="border border-slate-800 px-2 py-1 whitespace-nowrap">
-                                                        {dateStr}
-                                                    </td>
-                                                    <td className="border border-slate-800 px-2 py-1 text-center">
-                                                        {r.value1}
-                                                        {r.value2 !== undefined
-                                                            ? ` / ${r.value2}`
-                                                            : ''}
-                                                    </td>
-                                                    <td className="border border-slate-800 px-2 py-1 text-center">
-                                                        {r.state ?? '-'}
-                                                    </td>
-                                                    <td className="border border-slate-800 px-2 py-1">
-                                                        {r.memo ?? ''}
-                                                    </td>
+                                {/* 오른쪽: 최근 기록 리스트 */}
+                                <section className="md:col-span-2 p-4 rounded-xl bg-slate-900 border border-slate-800">
+                                    <h2 className="font-semibold mb-2">
+                                        최근 혈압 기록 (최대 10개)
+                                    </h2>
+                                    {records.length === 0 ? (
+                                        <p className="text-sm text-slate-400">
+                                            아직 혈압 기록이 없어요. 위의 &quot;혈압 기록
+                                            추가하기&quot; 버튼을 눌러서 첫 기록을 추가해보세요.
+                                        </p>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-sm border-collapse">
+                                                <thead>
+                                                <tr className="bg-slate-800">
+                                                    <th className="border border-slate-700 px-2 py-1 text-left">
+                                                        날짜/시간
+                                                    </th>
+                                                    <th className="border border-slate-700 px-2 py-1">
+                                                        혈압
+                                                    </th>
+                                                    <th className="border border-slate-700 px-2 py-1">
+                                                        상태
+                                                    </th>
+                                                    <th className="border border-slate-700 px-2 py-1">
+                                                        메모
+                                                    </th>
                                                 </tr>
-                                            );
-                                        })}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </section>
-                    </div>
+                                                </thead>
+                                                <tbody>
+                                                {records.map((r) => {
+                                                    const date = new Date(r.datetime);
+                                                    const dateStr = `${date.getFullYear()}-${String(
+                                                        date.getMonth() + 1,
+                                                    ).padStart(2, '0')}-${String(
+                                                        date.getDate(),
+                                                    ).padStart(2, '0')} ${String(
+                                                        date.getHours(),
+                                                    ).padStart(2, '0')}:${String(
+                                                        date.getMinutes(),
+                                                    ).padStart(2, '0')}`;
+                                                    return (
+                                                        <tr key={r.id}>
+                                                            <td className="border border-slate-800 px-2 py-1 whitespace-nowrap">
+                                                                {dateStr}
+                                                            </td>
+                                                            <td className="border border-slate-800 px-2 py-1 text-center">
+                                                                {r.value1}
+                                                                {r.value2 !== undefined
+                                                                    ? ` / ${r.value2}`
+                                                                    : ''}
+                                                            </td>
+                                                            <td className="border border-slate-800 px-2 py-1 text-center">
+                                                                {r.state ?? '-'}
+                                                            </td>
+                                                            <td className="border border-slate-800 px-2 py-1">
+                                                                {r.memo ?? ''}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </section>
+                            </div>
+                        )}
+                    </>
                 )}
             </div>
         </main>

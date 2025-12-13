@@ -1,17 +1,22 @@
 // app/records/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { getToken } from '@/lib/authStorage';
 
-const API_BASE = 'http://localhost:5001';
+const API_BASE =
+    process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
+
+type RecordType = 'blood_pressure' | 'blood_sugar';
 
 type HealthRecord = {
     id: number;
     datetime: string;
-    type: 'blood_sugar' | 'blood_pressure';
+    type: RecordType;
     value1: number;
     value2?: number | null;
+    pulse?: number | null;
     state?: string | null;
     memo?: string | null;
     sleepHours?: number | null;
@@ -19,66 +24,77 @@ type HealthRecord = {
     stressLevel?: number | null;
 };
 
+type FilterType = 'all' | RecordType;
+
 export default function RecordsPage() {
     const [records, setRecords] = useState<HealthRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-
-    // 날짜 필터 (선택)
-    const [from, setFrom] = useState('');
-    const [to, setTo] = useState('');
+    const [needLogin, setNeedLogin] = useState(false);
+    const [filterType, setFilterType] = useState<FilterType>('all');
     const [deletingId, setDeletingId] = useState<number | null>(null);
 
-    const fetchRecords = async () => {
+    // ---- 기록 목록 불러오기 (로그인 필요) ----
+    const fetchRecords = async (token: string, filter: FilterType) => {
         try {
             setLoading(true);
             setError(null);
 
+            const params = new URLSearchParams();
+            params.set('limit', '200');
+            if (filter !== 'all') {
+                params.set('type', filter);
+            }
+
             const res = await fetch(
-                `${API_BASE}/api/records?type=blood_pressure`,
+                `${API_BASE}/api/records?${params.toString()}`,
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`, // 🔹 토큰 붙이기
+                    },
+                },
             );
+
             if (!res.ok) {
-                throw new Error(`API error: ${res.status}`);
+                throw new Error(`records API error: ${res.status}`);
             }
 
             const json = (await res.json()) as HealthRecord[];
-
-            const sorted = [...json].sort(
-                (a, b) =>
-                    new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
-            );
-            setRecords(sorted);
+            setRecords(json);
         } catch (err: any) {
-            setError(err.message ?? '알 수 없는 오류');
+            setError(err.message ?? '기록을 불러오는 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }
     };
 
+    // 첫 진입 + 필터 변경 시, 토큰 확인 후 기록 불러오기
     useEffect(() => {
-        fetchRecords();
-    }, []);
+        if (typeof window === 'undefined') return;
 
-    const filteredRecords = useMemo(() => {
-        if (!from && !to) return records;
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setLoading(false);
+            return;
+        }
 
-        return records.filter((r) => {
-            const time = new Date(r.datetime).getTime();
-            if (from) {
-                const fromTime = new Date(from + 'T00:00').getTime();
-                if (time < fromTime) return false;
-            }
-            if (to) {
-                const toTime = new Date(to + 'T23:59').getTime();
-                if (time > toTime) return false;
-            }
-            return true;
-        });
-    }, [records, from, to]);
+        fetchRecords(token, filterType);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filterType]);
 
+    // ---- 기록 삭제 ----
     const handleDelete = async (id: number) => {
-        const ok = window.confirm('정말 이 기록을 삭제할까요?');
+        const ok = window.confirm('이 기록을 정말 삭제할까요?');
         if (!ok) return;
+
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setError('기록을 삭제하려면 로그인해야 합니다.');
+            return;
+        }
 
         try {
             setDeletingId(id);
@@ -86,16 +102,21 @@ export default function RecordsPage() {
 
             const res = await fetch(`${API_BASE}/api/records/${id}`, {
                 method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`, // 🔹 토큰 붙이기
+                },
             });
 
             if (!res.ok) {
-                const errJson = await res.json().catch(() => ({}));
-                throw new Error(errJson.error || `delete API error: ${res.status}`);
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `삭제 실패: ${res.status}`);
             }
 
+            // 삭제 성공 후 목록에서 제거
             setRecords((prev) => prev.filter((r) => r.id !== id));
         } catch (err: any) {
-            setError(err.message ?? '삭제 중 오류가 발생했어요.');
+            setError(err.message ?? '기록 삭제 중 오류가 발생했습니다.');
         } finally {
             setDeletingId(null);
         }
@@ -107,169 +128,171 @@ export default function RecordsPage() {
                 {/* 헤더 */}
                 <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
-                        <h1 className="text-2xl font-bold">📋 혈압 기록 관리</h1>
+                        <h1 className="text-2xl font-bold">📋 전체 건강 기록 관리</h1>
                         <p className="text-sm text-slate-300">
-                            그동안 저장한 혈압 기록을 한 번에 보고, 필요하면 삭제할 수 있어.
+                            저장된 혈압/혈당 기록을 한눈에 보고, 필요하면 삭제할 수 있어요.
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <Link href="/" className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-semibold">← 대시보드로</Link>
-                        <Link href="/records/new" className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold">➕ 새 기록 추가</Link>
+                        <Link
+                            href="/"
+                            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold"
+                        >
+                            ⬅ 대시보드로
+                        </Link>
+                        <Link
+                            href="/records/new"
+                            className="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-semibold"
+                        >
+                            ➕ 새 기록 추가
+                        </Link>
                     </div>
                 </header>
 
-                {/* 필터 영역 */}
-                <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-                    <h2 className="text-sm font-semibold text-slate-200">
-                        날짜 범위 필터 (선택)
-                    </h2>
-                    <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
-                        <div className="flex items-center gap-2 text-sm">
-                            <span className="text-slate-300">From</span>
-                            <input
-                                type="date"
-                                value={from}
-                                onChange={(e) => setFrom(e.target.value)}
-                                className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1 text-sm"
-                            />
-                        </div>
-                        <div className="flex items-center gap-2 text-sm">
-                            <span className="text-slate-300">To</span>
-                            <input
-                                type="date"
-                                value={to}
-                                onChange={(e) => setTo(e.target.value)}
-                                className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1 text-sm"
-                            />
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setFrom('');
-                                setTo('');
-                            }}
-                            className="text-xs px-3 py-1 rounded-lg border border-slate-600 bg-slate-950 hover:bg-slate-800"
-                        >
-                            필터 초기화
-                        </button>
-                    </div>
-                    <p className="text-[11px] text-slate-500">
-                        날짜 범위를 지정하지 않으면 모든 기록이 표시돼요.
-                    </p>
-                </section>
-
-                {loading && <p>불러오는 중...</p>}
-                {error && <p className="text-sm text-red-400">에러: {error}</p>}
-
-                {/* 테이블 */}
-                {!loading && !error && (
+                {/* 로그인 필요 안내 */}
+                {needLogin ? (
                     <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                        <h2 className="font-semibold mb-2 text-sm">전체 혈압 기록</h2>
-                        {filteredRecords.length === 0 ? (
-                            <p className="text-sm text-slate-400">
-                                조건에 맞는 기록이 없어요. 날짜 범위를 바꾸거나, 새 기록을 추가해보세요.
-                            </p>
-                        ) : (
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-sm border-collapse">
-                                    <thead>
-                                    <tr className="bg-slate-800">
-                                        <th className="border border-slate-700 px-2 py-1 text-left">
-                                            날짜/시간
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            혈압
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            수면
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            운동
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            스트레스
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            상태/메모
-                                        </th>
-                                        <th className="border border-slate-700 px-2 py-1">
-                                            관리
-                                        </th>
-                                    </tr>
-                                    </thead>
-                                    <tbody>
-                                    {filteredRecords.map((r) => {
-                                        const date = new Date(r.datetime);
-                                        const dateStr = `${date.getFullYear()}-${String(
-                                            date.getMonth() + 1,
-                                        ).padStart(2, '0')}-${String(
-                                            date.getDate(),
-                                        ).padStart(2, '0')} ${String(
-                                            date.getHours(),
-                                        ).padStart(2, '0')}:${String(
-                                            date.getMinutes(),
-                                        ).padStart(2, '0')}`;
-
-                                        return (
-                                            <tr key={r.id}>
-                                                <td className="border border-slate-800 px-2 py-1 whitespace-nowrap">
-                                                    {dateStr}
-                                                </td>
-                                                <td className="border border-slate-800 px-2 py-1 text-center whitespace-nowrap">
-                                                    {r.value1}
-                                                    {r.value2 != null ? ` / ${r.value2}` : ''}
-                                                </td>
-                                                <td className="border border-slate-800 px-2 py-1 text-center whitespace-nowrap">
-                                                    {r.sleepHours != null ? `${r.sleepHours}h` : '-'}
-                                                </td>
-                                                <td className="border border-slate-800 px-2 py-1 text-center whitespace-nowrap">
-                                                    {r.exercise == null
-                                                        ? '-'
-                                                        : r.exercise
-                                                            ? 'O'
-                                                            : 'X'}
-                                                </td>
-                                                <td className="border border-slate-800 px-2 py-1 text-center whitespace-nowrap">
-                                                    {r.stressLevel != null ? `${r.stressLevel}/5` : '-'}
-                                                </td>
-                                                <td className="border border-slate-800 px-2 py-1">
-                                                    <div className="text-xs text-slate-200">
-                                                        {r.state && (
-                                                            <span className="font-semibold">
-                                  [{r.state}]{' '}
-                                </span>
-                                                        )}
-                                                        <span className="text-slate-300">
-                                {r.memo ?? ''}
-                              </span>
-                                                    </div>
-                                                </td>
-                                                <td className="border border-slate-800 px-2 py-1 text-center">
-                                                    <div className="flex items-center justify-center gap-2">
-                                                        <Link
-                                                            href={`/records/${r.id}/edit`}
-                                                            className="px-3 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-semibold"
-                                                        >
-                                                            수정
-                                                        </Link>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleDelete(r.id)}
-                                                            disabled={deletingId === r.id}
-                                                            className="px-3 py-1 rounded-lg bg-red-500/80 hover:bg-red-500 text-xs font-semibold disabled:opacity-60"
-                                                        >
-                                                            {deletingId === r.id ? '삭제 중...' : '삭제'}
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
+                        <p className="text-sm text-slate-300">
+                            전체 기록을 보려면 먼저 로그인해야 합니다.
+                        </p>
+                        <div className="mt-3 flex gap-2">
+                            <Link
+                                href="/auth/login"
+                                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold"
+                            >
+                                로그인 하기
+                            </Link>
+                            <Link
+                                href="/auth/register"
+                                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-semibold"
+                            >
+                                회원가입
+                            </Link>
+                        </div>
                     </section>
+                ) : (
+                    <>
+                        {/* 필터 섹션 */}
+                        <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="text-sm text-slate-300">
+                                원하는 기록 종류만 골라서 볼 수 있어요.
+                            </div>
+                            <div className="flex items-center gap-2 text-sm">
+                                <span className="text-slate-300">종류:</span>
+                                <select
+                                    value={filterType}
+                                    onChange={(e) =>
+                                        setFilterType(e.target.value as FilterType)
+                                    }
+                                    className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1 text-sm"
+                                >
+                                    <option value="all">전체</option>
+                                    <option value="blood_pressure">혈압만</option>
+                                    <option value="blood_sugar">혈당만</option>
+                                </select>
+                            </div>
+                        </section>
+
+                        {loading && <p>불러오는 중...</p>}
+                        {error && (
+                            <p className="text-sm text-red-400 whitespace-pre-line">
+                                에러: {error}
+                            </p>
+                        )}
+
+                        {!loading && !error && (
+                            <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+                                {records.length === 0 ? (
+                                    <p className="text-sm text-slate-400">
+                                        선택한 조건에 맞는 기록이 없습니다.
+                                        <br />
+                                        상단의 &quot;새 기록 추가&quot; 버튼으로 건강 데이터를
+                                        추가해보세요.
+                                    </p>
+                                ) : (
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm border-collapse">
+                                            <thead>
+                                            <tr className="bg-slate-800">
+                                                <th className="border border-slate-700 px-2 py-1 text-left whitespace-nowrap">
+                                                    날짜/시간
+                                                </th>
+                                                <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">
+                                                    종류
+                                                </th>
+                                                <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">
+                                                    값
+                                                </th>
+                                                <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">
+                                                    상태
+                                                </th>
+                                                <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">
+                                                    메모
+                                                </th>
+                                                <th className="border border-slate-700 px-2 py-1 whitespace-nowrap">
+                                                    행동
+                                                </th>
+                                            </tr>
+                                            </thead>
+                                            <tbody>
+                                            {records.map((r) => {
+                                                const d = new Date(r.datetime);
+                                                const dateStr = `${d.getFullYear()}-${String(
+                                                    d.getMonth() + 1,
+                                                ).padStart(2, '0')}-${String(d.getDate()).padStart(
+                                                    2,
+                                                    '0',
+                                                )} ${String(d.getHours()).padStart(
+                                                    2,
+                                                    '0',
+                                                )}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+                                                const typeLabel =
+                                                    r.type === 'blood_pressure' ? '혈압' : '혈당';
+
+                                                const valueLabel =
+                                                    r.type === 'blood_pressure'
+                                                        ? `${r.value1}${
+                                                            r.value2 != null ? ` / ${r.value2}` : ''
+                                                        } mmHg`
+                                                        : `${r.value1} mg/dL`;
+
+                                                return (
+                                                    <tr key={r.id}>
+                                                        <td className="border border-slate-800 px-2 py-1 whitespace-nowrap">
+                                                            {dateStr}
+                                                        </td>
+                                                        <td className="border border-slate-800 px-2 py-1 text-center">
+                                                            {typeLabel}
+                                                        </td>
+                                                        <td className="border border-slate-800 px-2 py-1 text-center">
+                                                            {valueLabel}
+                                                        </td>
+                                                        <td className="border border-slate-800 px-2 py-1 text-center">
+                                                            {r.state ?? '-'}
+                                                        </td>
+                                                        <td className="border border-slate-800 px-2 py-1 max-w-[260px]">
+                                                            {r.memo ?? ''}
+                                                        </td>
+                                                        <td className="border border-slate-800 px-2 py-1 text-center whitespace-nowrap">
+                                                            <button
+                                                                onClick={() => handleDelete(r.id)}
+                                                                disabled={deletingId === r.id}
+                                                                className="px-3 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-xs font-semibold disabled:opacity-60"
+                                                            >
+                                                                {deletingId === r.id ? '삭제 중...' : '삭제'}
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </section>
+                        )}
+                    </>
                 )}
             </div>
         </main>
