@@ -4,6 +4,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { getToken } from '@/lib/authStorage';
+import {
+    LineChart,
+    Line,
+    XAxis,
+    YAxis,
+    CartesianGrid,
+    Tooltip,
+    Legend,
+} from 'recharts';
 
 const API_BASE =
     process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
@@ -39,7 +48,7 @@ export default function ChartsPage() {
     const [rangeDays, setRangeDays] = useState<RangeOption>(14);
     const [needLogin, setNeedLogin] = useState(false);
 
-    // ---- 백엔드에서 기록 가져오기 (토큰 필요) ----
+    // ---- 백엔드에서 기록 가져오기 (로그인 필요 시 토큰 붙이기) ----
     const fetchRecords = async (token: string) => {
         try {
             setLoading(true);
@@ -50,7 +59,7 @@ export default function ChartsPage() {
                 {
                     headers: {
                         'Content-Type': 'application/json',
-                        Authorization: `Bearer ${token}`, // 🔹 토큰 추가
+                        Authorization: `Bearer ${token}`, // 💡 토큰 헤더
                     },
                 },
             );
@@ -61,6 +70,7 @@ export default function ChartsPage() {
 
             const json = (await res.json()) as HealthRecord[];
 
+            // 오래된 것 → 최근 순으로 정렬
             const sorted = [...json].sort(
                 (a, b) =>
                     new Date(a.datetime).getTime() - new Date(b.datetime).getTime(),
@@ -74,7 +84,7 @@ export default function ChartsPage() {
         }
     };
 
-    // 처음 마운트될 때 토큰 확인 → 있으면 fetch, 없으면 로그인 안내
+    // 마운트 시: 토큰 확인 후 불러오기
     useEffect(() => {
         if (typeof window === 'undefined') return;
 
@@ -131,7 +141,7 @@ export default function ChartsPage() {
                     <div>
                         <h1 className="text-2xl font-bold">📈 혈압 추이 라인차트</h1>
                         <p className="text-sm text-slate-300">
-                            최근 기간 동안의 혈압 변화를 라인 차트로 확인할 수 있어요.
+                            최근 기간 동안의 혈압 변화를 시각화한 페이지야.
                         </p>
                     </div>
                     <Link
@@ -142,29 +152,11 @@ export default function ChartsPage() {
                     </Link>
                 </header>
 
-                {/* 기간 선택 */}
-                {!needLogin && (
-                    <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div className="text-sm text-slate-300">
-                            분석하고 싶은 기간을 선택하면, 그 범위 안에 있는 혈압 기록만
-                            차트로 보여줄게.
-                        </div>
-                        <div className="flex items-center gap-2 text-sm">
-                            <span className="text-slate-300">기간:</span>
-                            <select
-                                value={rangeDays}
-                                onChange={(e) =>
-                                    setRangeDays(Number(e.target.value) as RangeOption)
-                                }
-                                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1 text-sm"
-                            >
-                                <option value={7}>최근 7일</option>
-                                <option value={14}>최근 14일</option>
-                                <option value={30}>최근 30일</option>
-                            </select>
-                        </div>
-                    </section>
-                )}
+                {/* (디버그용) 데이터 개수 표시 – 확인 후 마음에 안 들면 지워도 됨 */}
+                <section className="text-xs text-slate-500">
+                    <div>전체 records: {records.length}개</div>
+                    <div>차트에 쓰이는 데이터: {chartData.length}개</div>
+                </section>
 
                 {/* 로그인 필요 안내 */}
                 {needLogin ? (
@@ -189,6 +181,28 @@ export default function ChartsPage() {
                     </section>
                 ) : (
                     <>
+                        {/* 기간 선택 */}
+                        <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="text-sm text-slate-300">
+                                분석하고 싶은 기간을 선택하면, 그 범위 안에 있는 혈압 기록만
+                                차트로 보여줄게.
+                            </div>
+                            <div className="flex items-center gap-2 text-sm">
+                                <span className="text-slate-300">기간:</span>
+                                <select
+                                    value={rangeDays}
+                                    onChange={(e) =>
+                                        setRangeDays(Number(e.target.value) as RangeOption)
+                                    }
+                                    className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1 text-sm"
+                                >
+                                    <option value={7}>최근 7일</option>
+                                    <option value={14}>최근 14일</option>
+                                    <option value={30}>최근 30일</option>
+                                </select>
+                            </div>
+                        </section>
+
                         {loading && <p>불러오는 중...</p>}
                         {error && (
                             <p className="text-red-400 text-sm">에러: {error}</p>
@@ -210,21 +224,88 @@ export default function ChartsPage() {
                                         <h2 className="font-semibold mb-2">혈압 추이</h2>
 
                                         <div className="w-full overflow-x-auto">
-                                            {/* 고정 크기 차트 컨테이너 */}
+                                            {/* 고정 크기 차트 – width/height를 명시해서 -1 에러 방지 */}
                                             <div className="min-w-[720px]">
-                                                {/* Recharts 컴포넌트 */}
-                                                {/* 이 아래 부분은 네가 이미 쓰던 LineChart 코드 그대로 두면 돼 */}
-                                                {/* 예시: */}
-                                                {/*
-                        <LineChart
-                          width={720}
-                          height={320}
-                          data={chartData}
-                          margin={{ top: 20, right: 30, left: 10, bottom: 20 }}
-                        >
-                          ...
-                        </LineChart>
-                        */}
+                                                <LineChart
+                                                    width={720}
+                                                    height={320}
+                                                    data={chartData}
+                                                    margin={{
+                                                        top: 20,
+                                                        right: 30,
+                                                        left: 10,
+                                                        bottom: 20,
+                                                    }}
+                                                >
+                                                    <CartesianGrid
+                                                        strokeDasharray="3 3"
+                                                        opacity={0.3}
+                                                    />
+                                                    <XAxis
+                                                        dataKey="label"
+                                                        tick={{ fontSize: 10, fill: '#cbd5f5' }}
+                                                        minTickGap={20}
+                                                    />
+                                                    <YAxis
+                                                        tick={{ fontSize: 10, fill: '#cbd5f5' }}
+                                                        domain={['auto', 'auto']}
+                                                        label={{
+                                                            value: 'mmHg',
+                                                            angle: -90,
+                                                            position: 'insideLeft',
+                                                            fill: '#cbd5f5',
+                                                            fontSize: 10,
+                                                        }}
+                                                    />
+                                                    <Tooltip
+                                                        contentStyle={{
+                                                            backgroundColor: '#020617',
+                                                            border: '1px solid #1e293b',
+                                                            borderRadius: 8,
+                                                            fontSize: 12,
+                                                        }}
+                                                        formatter={(value, name) => {
+                                                            if (name === 'sys')
+                                                                return [`${value} mmHg`, '수축기'];
+                                                            if (name === 'dia')
+                                                                return [`${value} mmHg`, '이완기'];
+                                                            return [value, name];
+                                                        }}
+                                                        labelFormatter={(label, payload) => {
+                                                            const p = payload?.[0]
+                                                                ?.payload as ChartPoint | undefined;
+                                                            return p
+                                                                ? `${label} (${p.state ?? 'state 없음'})`
+                                                                : label;
+                                                        }}
+                                                    />
+                                                    <Legend
+                                                        formatter={(value) =>
+                                                            value === 'sys'
+                                                                ? '수축기'
+                                                                : value === 'dia'
+                                                                    ? '이완기'
+                                                                    : value
+                                                        }
+                                                    />
+                                                    <Line
+                                                        type="monotone"
+                                                        dataKey="sys"
+                                                        stroke="#38bdf8"
+                                                        strokeWidth={2}
+                                                        dot={{ r: 2 }}
+                                                        name="수축기"
+                                                    />
+                                                    <Line
+                                                        type="monotone"
+                                                        dataKey="dia"
+                                                        stroke="#f97316"
+                                                        strokeWidth={2}
+                                                        dot={{ r: 2 }}
+                                                        name="이완기"
+                                                        connectNulls
+                                                    />
+                                                </LineChart>
                                             </div>
                                         </div>
 

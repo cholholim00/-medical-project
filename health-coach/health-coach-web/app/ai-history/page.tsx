@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { getToken } from '@/lib/authStorage';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
 
@@ -21,6 +22,8 @@ export default function AiHistoryPage() {
     const [logs, setLogs] = useState<AiCoachLog[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [needLogin, setNeedLogin] = useState(false);
+
 
     const fetchHistory = async () => {
         try {

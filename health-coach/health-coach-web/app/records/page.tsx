@@ -34,6 +34,7 @@ export default function RecordsPage() {
     const [filterType, setFilterType] = useState<FilterType>('all');
     const [deletingId, setDeletingId] = useState<number | null>(null);
 
+
     // ---- 기록 목록 불러오기 (로그인 필요) ----
     const fetchRecords = async (token: string, filter: FilterType) => {
         try {

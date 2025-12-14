@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { getToken, setAuth } from '@/lib/authStorage';  // 🔹 authStorage 사용
 
 const API_BASE =
     process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
@@ -16,13 +17,11 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // 이미 로그인 되어 있으면 / 로 보내기
+    // 이미 로그인되어 있으면 / 로 보내기
     useEffect(() => {
-        if (typeof window !== 'undefined') {
-            const token = localStorage.getItem('hc_token');
-            if (token) {
-                router.replace('/');
-            }
+        const token = getToken();
+        if (token) {
+            router.replace('/');
         }
     }, [router]);
 
@@ -43,15 +42,13 @@ export default function LoginPage() {
                 throw new Error(err.error || `로그인 실패: ${res.status}`);
             }
 
-            const json = await res.json() as {
+            const json = (await res.json()) as {
                 token: string;
                 user: { id: number; email: string; name?: string | null };
             };
 
-            if (typeof window !== 'undefined') {
-                localStorage.setItem('hc_token', json.token);
-                localStorage.setItem('hc_user', JSON.stringify(json.user));
-            }
+            // 🔹 여기서 공통 유틸로 토큰 + 유저 저장
+            setAuth(json.token, json.user);
 
             router.push('/');
         } catch (err: any) {

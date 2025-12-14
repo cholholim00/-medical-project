@@ -1,9 +1,10 @@
 // app/page.tsx
 'use client';
+
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getToken, getUser, clearAuth } from '@/lib/authStorage'; // 🔹 수정
+import { getToken, getUser, clearAuth } from '@/lib/authStorage';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
 
@@ -80,6 +81,12 @@ function levelColor(level: Level): string {
     }
 }
 
+type StoredUser = {
+    id: number;
+    email: string;
+    name?: string | null;
+};
+
 export default function Home() {
     const [summary, setSummary] = useState<SummaryResponse | null>(null);
     const [records, setRecords] = useState<HealthRecord[]>([]);
@@ -89,22 +96,17 @@ export default function Home() {
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [clearing, setClearing] = useState(false);
     const [needLogin, setNeedLogin] = useState(false);
-    const [user, setUser] = useState<ReturnType<typeof getUser>>(null); // 🔹 추가
+    const [user, setUser] = useState<StoredUser | null>(null);
     const router = useRouter();
 
+    // 🔹 로그아웃 처리 (공통)
     const handleLogout = () => {
-        if (typeof window === 'undefined') return;
-
-        // 로그인 정보 삭제
-        localStorage.removeItem('hc_token');
-        localStorage.removeItem('hc_user');
-
-        // 대시보드 상태 리셋
+        clearAuth();            // 토큰 + 유저 정보 삭제
+        setUser(null);
         setSummary(null);
         setRecords([]);
         setNeedLogin(true);
-
-        // 로그인 페이지로 이동
+        setError(null);
         router.push('/auth/login');
     };
 
@@ -129,6 +131,12 @@ export default function Home() {
                 }),
             ]);
 
+            // 401 처리: 토큰 만료/잘못된 경우
+            if (summaryRes.status === 401 || recordsRes.status === 401) {
+                handleLogout();
+                throw new Error('인증이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.');
+            }
+
             if (!summaryRes.ok) {
                 throw new Error(`summary API error: ${summaryRes.status}`);
             }
@@ -151,14 +159,6 @@ export default function Home() {
         } finally {
             setLoading(false);
         }
-        const handleLogout = () => {
-            clearAuth();
-            setUser(null);
-            setSummary(null);
-            setRecords([]);
-            setNeedLogin(true);
-            setError(null);
-        };
     };
 
     // 🔹 샘플 데이터 생성 (로그인 필요)
@@ -173,6 +173,7 @@ export default function Home() {
         try {
             setSeeding(true);
             setError(null);
+
             const res = await fetch(`${API_BASE}/api/records/dev/seed-bp`, {
                 method: 'POST',
                 headers: {
@@ -184,6 +185,11 @@ export default function Home() {
                     perDay: 5,
                 }),
             });
+
+            if (res.status === 401) {
+                handleLogout();
+                throw new Error('인증이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.');
+            }
 
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
@@ -223,6 +229,11 @@ export default function Home() {
                 },
             });
 
+            if (res.status === 401) {
+                handleLogout();
+                throw new Error('인증이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.');
+            }
+
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.error || `clear API error: ${res.status}`);
@@ -247,14 +258,13 @@ export default function Home() {
             return;
         }
 
-        const u = getUser();
+        const u = getUser() as StoredUser | null;
         if (u) {
             setUser(u);
         }
 
         fetchData(token);
     }, []);
-
 
     const latest = records.length > 0 ? records[0] : null;
     const latestSys =
@@ -280,9 +290,7 @@ export default function Home() {
                         <div className="text-xs text-slate-300 flex items-center gap-2">
                             {user ? (
                                 <>
-          <span>
-            {user.name ?? user.email} 님, 환영해요 👋
-          </span>
+                                    <span>{user.name ?? user.email} 님, 환영해요 👋</span>
                                     <button
                                         onClick={handleLogout}
                                         className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-[11px] font-semibold"
@@ -303,7 +311,7 @@ export default function Home() {
                             )}
                         </div>
 
-                        {/* 기존 버튼들 */}
+                        {/* 기존 네비 버튼들 */}
                         <div className="flex flex-wrap gap-2">
                             <Link
                                 href="/records/new"
@@ -345,7 +353,6 @@ export default function Home() {
                     </div>
                 </header>
 
-
                 {/* 샘플 생성 / 전체 삭제 섹션 */}
                 <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <p className="text-sm text-slate-300">
@@ -371,7 +378,7 @@ export default function Home() {
                     </div>
                 </section>
 
-                {/* 🔹 여기서부터: 로그인 여부에 따라 다르게 렌더링 */}
+                {/* 로그인 여부에 따라 UI 분기 */}
                 {needLogin ? (
                     // 로그인 안 되어 있을 때: 로그인 안내 카드
                     <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
@@ -394,10 +401,13 @@ export default function Home() {
                         </div>
                     </section>
                 ) : (
-                    // 로그인 되어 있을 때: 기존 로딩/에러/대시보드 UI
                     <>
                         {loading && <p>불러오는 중...</p>}
-                        {error && <p className="text-red-400 text-sm">에러: {error}</p>}
+                        {error && (
+                            <p className="text-red-400 text-sm whitespace-pre-line">
+                                에러: {error}
+                            </p>
+                        )}
 
                         {!loading && !error && (
                             <div className="grid md:grid-cols-3 gap-4">

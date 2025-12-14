@@ -24,6 +24,7 @@ export default function NewRecordPage() {
     const [state, setState] = useState<string>(''); // 상태 라벨
     const [memo, setMemo] = useState<string>(''); // 메모
 
+
     // 라이프스타일 필드
     const [sleepHours, setSleepHours] = useState<string>('7');
     const [exercise, setExercise] = useState<boolean>(false);

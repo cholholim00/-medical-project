@@ -3,6 +3,8 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { getToken } from '@/lib/authStorage';
+
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
 
@@ -41,6 +43,8 @@ export default function EditRecordPage() {
 
     const [submitting, setSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
+    const [needLogin, setNeedLogin] = useState(false);
+
 
     useEffect(() => {
         if (!id || Number.isNaN(id)) {

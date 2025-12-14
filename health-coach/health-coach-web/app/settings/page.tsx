@@ -3,6 +3,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { getToken } from '@/lib/authStorage';
+
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
 
@@ -20,6 +22,8 @@ export default function SettingsPage() {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [message, setMessage] = useState<string | null>(null);
+    const [needLogin, setNeedLogin] = useState(false);
+
 
     const fetchProfile = async () => {
         try {
