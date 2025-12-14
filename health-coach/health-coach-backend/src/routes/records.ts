@@ -15,13 +15,20 @@ function calcAvg(nums: number[]): number | null {
 
 type RecordType = 'blood_pressure' | 'blood_sugar';
 
+type GroupStats = {
+    count: number;
+    avg_sys: number | null;
+    avg_dia: number | null;
+};
+
 // =========================
 // 1. 기록 목록 조회
 // GET /api/records?type=blood_pressure
 // =========================
 router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const userId = req.userId!;
+        const userId = req.user!.id;  // ✅ 수정
+
         const type = req.query.type as RecordType | undefined;
         const limitParam = req.query.limit as string | undefined;
         const limit =
@@ -58,7 +65,7 @@ router.get(
         try {
             console.log('➡️  GET /api/records/stats/summary', req.query);
 
-            const userId = req.userId!;
+            const userId = req.user!.id;  // ✅ 수정
             const rangeParam = req.query.rangeDays as string | undefined;
             const rangeDays = rangeParam ? parseInt(rangeParam, 10) : 7;
 
@@ -125,7 +132,8 @@ router.get(
     requireAuth,
     async (req: AuthRequest, res: Response) => {
         try {
-            const userId = req.userId!;
+            const userId = req.user!.id;  // ✅ 수정
+
             const rangeParam = req.query.rangeDays as string | undefined;
             const rangeDays = rangeParam ? parseInt(rangeParam, 10) : 30;
 
@@ -145,12 +153,6 @@ router.get(
                 if (!nums.length) return null;
                 const sum = nums.reduce((acc, n) => acc + n, 0);
                 return sum / nums.length;
-            };
-
-            type GroupStats = {
-                count: number;
-                avg_sys: number | null;
-                avg_dia: number | null;
             };
 
             const makeStats = (list: typeof records): GroupStats => {
@@ -230,7 +232,8 @@ router.post(
     requireAuth,
     async (req: AuthRequest, res: Response) => {
         try {
-            const userId = req.userId!;
+            const userId = req.user!.id;  // ✅ 수정
+
             const { days, perDay } = req.body as {
                 days?: number;
                 perDay?: number;
@@ -349,7 +352,8 @@ router.delete(
     requireAuth,
     async (req: AuthRequest, res: Response) => {
         try {
-            const userId = req.userId!;
+            const userId = req.user!.id;  // ✅ 수정
+
             const result = await prisma.healthRecord.deleteMany({
                 where: { userId },
             });
@@ -370,7 +374,8 @@ router.delete(
 // =========================
 router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const userId = req.userId!;
+        const userId = req.user!.id;  // ✅ 수정
+
         const id = Number(req.params.id);
         if (Number.isNaN(id)) {
             return res.status(400).json({ error: '잘못된 id 입니다.' });
@@ -399,7 +404,8 @@ router.get('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
 // =========================
 router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const userId = req.userId!;
+        const userId = req.user!.id;  // ✅ 수정
+
         const {
             type,
             datetime,
@@ -461,7 +467,8 @@ router.post('/', requireAuth, async (req: AuthRequest, res: Response) => {
 // =========================
 router.put('/:id', requireAuth, async (req: AuthRequest, res: Response) => {
     try {
-        const userId = req.userId!;
+        const userId = req.user!.id;  // ✅ 수정
+
         const id = Number(req.params.id);
         if (Number.isNaN(id)) {
             return res.status(400).json({ error: '잘못된 id 입니다.' });
@@ -544,7 +551,8 @@ router.delete(
     requireAuth,
     async (req: AuthRequest, res: Response) => {
         try {
-            const userId = req.userId!;
+            const userId = req.user!.id;  // ✅ 수정
+
             const id = Number(req.params.id);
             if (Number.isNaN(id)) {
                 return res.status(400).json({ error: '잘못된 id 입니다.' });

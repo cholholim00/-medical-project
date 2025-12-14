@@ -4,7 +4,12 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getToken, getUser, clearAuth } from '@/lib/authStorage';
+import {
+    getToken,
+    getUser,
+    clearAuth,
+    type StoredUser,
+} from '@/lib/authStorage';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
 
@@ -29,13 +34,6 @@ type HealthRecord = {
     value2?: number;
     state?: string | null;
     memo?: string | null;
-};
-
-type UserProfile = {
-    id: number;
-    userId: number;
-    targetSys: number;
-    targetDia: number;
 };
 
 type Level = 'normal' | 'elevated' | 'stage1' | 'stage2' | 'unknown';
@@ -81,27 +79,20 @@ function levelColor(level: Level): string {
     }
 }
 
-type StoredUser = {
-    id: number;
-    email: string;
-    name?: string | null;
-};
-
 export default function Home() {
+    const router = useRouter();
+
     const [summary, setSummary] = useState<SummaryResponse | null>(null);
     const [records, setRecords] = useState<HealthRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [seeding, setSeeding] = useState(false);
-    const [profile, setProfile] = useState<UserProfile | null>(null);
     const [clearing, setClearing] = useState(false);
     const [needLogin, setNeedLogin] = useState(false);
     const [user, setUser] = useState<StoredUser | null>(null);
-    const router = useRouter();
 
-    // 🔹 로그아웃 처리 (공통)
     const handleLogout = () => {
-        clearAuth();            // 토큰 + 유저 정보 삭제
+        clearAuth();
         setUser(null);
         setSummary(null);
         setRecords([]);
@@ -110,7 +101,7 @@ export default function Home() {
         router.push('/auth/login');
     };
 
-    // 🔹 토큰을 인자로 받아서 데이터 로딩
+    // 토큰을 인자로 받아서 데이터 로딩
     const fetchData = async (token: string) => {
         try {
             setLoading(true);
@@ -130,12 +121,6 @@ export default function Home() {
                     },
                 }),
             ]);
-
-            // 401 처리: 토큰 만료/잘못된 경우
-            if (summaryRes.status === 401 || recordsRes.status === 401) {
-                handleLogout();
-                throw new Error('인증이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.');
-            }
 
             if (!summaryRes.ok) {
                 throw new Error(`summary API error: ${summaryRes.status}`);
@@ -161,7 +146,7 @@ export default function Home() {
         }
     };
 
-    // 🔹 샘플 데이터 생성 (로그인 필요)
+    // 샘플 데이터 생성 (로그인 필요)
     const handleSeed = async () => {
         const token = getToken();
         if (!token) {
@@ -173,7 +158,6 @@ export default function Home() {
         try {
             setSeeding(true);
             setError(null);
-
             const res = await fetch(`${API_BASE}/api/records/dev/seed-bp`, {
                 method: 'POST',
                 headers: {
@@ -185,11 +169,6 @@ export default function Home() {
                     perDay: 5,
                 }),
             });
-
-            if (res.status === 401) {
-                handleLogout();
-                throw new Error('인증이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.');
-            }
 
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
@@ -204,7 +183,7 @@ export default function Home() {
         }
     };
 
-    // 🔹 전체 삭제 (로그인 필요)
+    // 전체 삭제 (로그인 필요)
     const handleClearAll = async () => {
         const token = getToken();
         if (!token) {
@@ -229,11 +208,6 @@ export default function Home() {
                 },
             });
 
-            if (res.status === 401) {
-                handleLogout();
-                throw new Error('인증이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.');
-            }
-
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 throw new Error(err.error || `clear API error: ${res.status}`);
@@ -247,7 +221,7 @@ export default function Home() {
         }
     };
 
-    // 🔹 마운트 시 토큰 확인 → 없으면 로그인 안내, 있으면 데이터 로딩
+    // 마운트 시 토큰 확인 → 없으면 로그인 안내, 있으면 데이터 로딩
     useEffect(() => {
         if (typeof window === 'undefined') return;
 
@@ -258,13 +232,13 @@ export default function Home() {
             return;
         }
 
-        const u = getUser() as StoredUser | null;
+        const u = getUser();
         if (u) {
             setUser(u);
         }
 
         fetchData(token);
-    }, []);
+    }, [router]);
 
     const latest = records.length > 0 ? records[0] : null;
     const latestSys =
@@ -311,13 +285,19 @@ export default function Home() {
                             )}
                         </div>
 
-                        {/* 기존 네비 버튼들 */}
+                        {/* 네비게이션 버튼들 */}
                         <div className="flex flex-wrap gap-2">
                             <Link
                                 href="/records/new"
                                 className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold"
                             >
                                 ➕ 혈압 기록 추가하기
+                            </Link>
+                            <Link
+                                href="/mobile/checkin"
+                                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold"
+                            >
+                                📱 모바일 체크인
                             </Link>
                             <Link
                                 href="/ai-coach"
@@ -378,9 +358,8 @@ export default function Home() {
                     </div>
                 </section>
 
-                {/* 로그인 여부에 따라 UI 분기 */}
+                {/* 로그인 여부에 따라 */}
                 {needLogin ? (
-                    // 로그인 안 되어 있을 때: 로그인 안내 카드
                     <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
                         <p className="text-sm text-slate-300">
                             이 대시보드는 로그인 후에만 볼 수 있어요.
@@ -403,11 +382,7 @@ export default function Home() {
                 ) : (
                     <>
                         {loading && <p>불러오는 중...</p>}
-                        {error && (
-                            <p className="text-red-400 text-sm whitespace-pre-line">
-                                에러: {error}
-                            </p>
-                        )}
+                        {error && <p className="text-red-400 text-sm">에러: {error}</p>}
 
                         {!loading && !error && (
                             <div className="grid md:grid-cols-3 gap-4">
@@ -488,9 +463,9 @@ export default function Home() {
                                     )}
 
                                     <p className="text-[11px] text-slate-500">
-                                        ※ 이 분류는 일반적인 혈압 범위를 참고한 것이며, 의료적
-                                        진단이나 치료 지시가 아닙니다. 걱정되는 수치가 계속된다면
-                                        의료 전문가와 상담하세요.
+                                        ※ 이 분류는 일반적인 혈압 범위를 참고한 것이며, 의료적 진단이나
+                                        치료 지시가 아닙니다. 걱정되는 수치가 계속된다면 의료 전문가와
+                                        상담하세요.
                                     </p>
                                 </section>
 
@@ -501,8 +476,8 @@ export default function Home() {
                                     </h2>
                                     {records.length === 0 ? (
                                         <p className="text-sm text-slate-400">
-                                            아직 혈압 기록이 없어요. 위의 &quot;혈압 기록
-                                            추가하기&quot; 버튼을 눌러서 첫 기록을 추가해보세요.
+                                            아직 혈압 기록이 없어요. 위의 &quot;혈압 기록 추가하기&quot;
+                                            버튼을 눌러서 첫 기록을 추가해보세요.
                                         </p>
                                     ) : (
                                         <div className="overflow-x-auto">

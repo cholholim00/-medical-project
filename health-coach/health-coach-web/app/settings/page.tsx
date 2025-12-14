@@ -5,7 +5,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getToken } from '@/lib/authStorage';
 
-
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
 
 type UserProfile = {
@@ -16,155 +15,220 @@ type UserProfile = {
 };
 
 export default function SettingsPage() {
-    const [targetSys, setTargetSys] = useState<number | ''>('');
-    const [targetDia, setTargetDia] = useState<number | ''>('');
+    const [needLogin, setNeedLogin] = useState(false);
+    const [profile, setProfile] = useState<UserProfile | null>(null);
+    const [targetSys, setTargetSys] = useState<string>('');
+    const [targetDia, setTargetDia] = useState<string>('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [message, setMessage] = useState<string | null>(null);
-    const [needLogin, setNeedLogin] = useState(false);
+    const [success, setSuccess] = useState<string | null>(null);
 
-
-    const fetchProfile = async () => {
+    const fetchProfile = async (token: string) => {
         try {
             setLoading(true);
             setError(null);
-            setMessage(null);
 
-            const res = await fetch(`${API_BASE}/api/user/profile`);
+            const res = await fetch(`${API_BASE}/api/user/profile`, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+
             if (res.status === 404) {
-                // 아직 프로필 없음 → 기본 추천값 세팅
-                setTargetSys(130);
-                setTargetDia(85);
+                // 아직 설정 안한 경우
+                setProfile(null);
+                setTargetSys('');
+                setTargetDia('');
                 return;
             }
+
             if (!res.ok) {
-                throw new Error(`API error: ${res.status}`);
+                throw new Error(`profile API error: ${res.status}`);
             }
-            const json = (await res.json()) as UserProfile;
-            setTargetSys(json.targetSys);
-            setTargetDia(json.targetDia);
+
+            const json = await res.json() as UserProfile | null;
+            setProfile(json);
+            if (json) {
+                setTargetSys(String(json.targetSys));
+                setTargetDia(String(json.targetDia));
+            }
         } catch (err: any) {
-            setError(err.message ?? '프로필 정보를 불러오는 중 오류가 발생했습니다.');
+            setError(err.message ?? '목표 혈압 정보를 불러오는 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }
     };
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setLoading(false);
+            return;
+        }
+
+        fetchProfile(token);
+    }, []);
+
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (targetSys === '' || targetDia === '') return;
+        setError(null);
+        setSuccess(null);
+
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setError('목표 혈압을 저장하려면 먼저 로그인해야 합니다.');
+            return;
+        }
+
+        if (!targetSys || !targetDia) {
+            setError('수축기/이완기 목표 값을 모두 입력해 주세요.');
+            return;
+        }
 
         try {
             setSaving(true);
-            setError(null);
-            setMessage(null);
+
+            const body = {
+                targetSys: Number(targetSys),
+                targetDia: Number(targetDia),
+            };
 
             const res = await fetch(`${API_BASE}/api/user/profile`, {
-                method: 'PUT',
+                method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({
-                    targetSys: Number(targetSys),
-                    targetDia: Number(targetDia),
-                }),
+                body: JSON.stringify(body),
             });
 
             if (!res.ok) {
-                const errJson = await res.json().catch(() => ({}));
-                throw new Error(errJson.error || `API error: ${res.status}`);
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `목표 혈압 저장 실패: ${res.status}`);
             }
 
-            setMessage('목표 혈압이 저장되었습니다.');
+            const json = await res.json() as UserProfile;
+            setProfile(json);
+            setSuccess('목표 혈압이 저장되었습니다.');
         } catch (err: any) {
-            setError(err.message ?? '저장 중 오류가 발생했습니다.');
+            setError(err.message ?? '목표 혈압을 저장하는 중 오류가 발생했습니다.');
         } finally {
             setSaving(false);
         }
     };
 
-    useEffect(() => {
-        fetchProfile();
-    }, []);
-
     return (
         <main className="min-h-screen bg-slate-950 text-slate-100 flex justify-center">
-            <div className="w-full max-w-xl p-6 space-y-6">
-                <header>
-                    <h1 className="text-2xl font-bold">⚙️ 목표 혈압 설정</h1>
-                    <p className="text-sm text-slate-300 mt-1">
-                        이 값은 대시보드와 AI 코치에서 참고 기준으로 사용돼. 의료적인 진단이
-                        아니라, 나만의 목표 범위를 정하는 용도야.
-                    </p>
+            <div className="w-full max-w-md p-6 space-y-6">
+                <header className="flex items-center justify-between gap-3">
+                    <div>
+                        <h1 className="text-2xl font-bold">🎯 목표 혈압 설정</h1>
+                        <p className="text-xs text-slate-300">
+                            AI 코치가 참고할 나만의 목표 혈압 범위를 설정할 수 있어요.
+                        </p>
+                    </div>
                     <Link
                         href="/"
-                        className="text-sm text-slate-300 hover:text-slate-100 underline"
+                        className="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold"
                     >
-                        ← 대시보드로
+                        ⬅ 대시보드로
                     </Link>
                 </header>
 
-                <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                    {loading ? (
-                        <p className="text-sm text-slate-300">불러오는 중...</p>
-                    ) : (
-                        <form onSubmit={handleSave} className="space-y-4">
-                            <div className="flex flex-col gap-3">
-                                <label className="text-sm text-slate-200">
-                                    목표 혈압 (수축기 / 이완기)
-                                </label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="number"
-                                        className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm"
-                                        placeholder="수축기 (예: 130)"
-                                        value={targetSys}
-                                        onChange={(e) =>
-                                            setTargetSys(e.target.value === '' ? '' : Number(e.target.value))
-                                        }
-                                    />
-                                    <span className="self-center text-slate-400">/</span>
-                                    <input
-                                        type="number"
-                                        className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-sm"
-                                        placeholder="이완기 (예: 85)"
-                                        value={targetDia}
-                                        onChange={(e) =>
-                                            setTargetDia(e.target.value === '' ? '' : Number(e.target.value))
-                                        }
-                                    />
-                                    <span className="self-center text-xs text-slate-400">mmHg</span>
-                                </div>
-                                <p className="text-xs text-slate-400">
-                                    예를 들어 130 / 85 mmHg는, 내가 관리 목표로 삼고 싶은 상한선을
-                                    의미해. 실제 건강 상태에 대한 판단은 반드시 의료 전문가와
-                                    상의해야 해.
-                                </p>
-                            </div>
-
-                            {error && (
-                                <p className="text-sm text-red-400">에러: {error}</p>
-                            )}
-                            {message && (
-                                <p className="text-sm text-emerald-400">{message}</p>
-                            )}
-
-                            <button
-                                type="submit"
-                                disabled={saving || targetSys === '' || targetDia === ''}
-                                className="w-full py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold disabled:opacity-60"
+                {needLogin ? (
+                    <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+                        <p className="text-sm text-slate-300">
+                            목표 혈압을 설정하려면 로그인이 필요합니다.
+                        </p>
+                        <div className="mt-3 flex gap-2">
+                            <Link
+                                href="/auth/login"
+                                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold"
                             >
-                                {saving ? '저장 중...' : '저장하기'}
-                            </button>
-                        </form>
-                    )}
-                </section>
+                                로그인 하기
+                            </Link>
+                            <Link
+                                href="/auth/register"
+                                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-semibold"
+                            >
+                                회원가입
+                            </Link>
+                        </div>
+                    </section>
+                ) : (
+                    <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
+                        {loading ? (
+                            <p className="text-sm text-slate-300">불러오는 중...</p>
+                        ) : (
+                            <>
+                                {profile && (
+                                    <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 space-y-1">
+                                        <p>
+                                            현재 목표: <span className="font-semibold">
+                        {profile.targetSys} / {profile.targetDia} mmHg
+                      </span>
+                                        </p>
+                                    </div>
+                                )}
 
-                <p className="text-[11px] text-slate-500">
-                    ※ 이 앱에서 제공하는 정보는 건강 관리를 스스로 이해하는 데 도움을 주기
-                    위한 참고용이야. 정확한 진단이나 치료 결정은 의료 전문가와 꼭 상담해줘.
-                </p>
+                                <form onSubmit={handleSave} className="space-y-4">
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="space-y-1">
+                                            <label className="text-sm text-slate-300">목표 수축기 (위 혈압)</label>
+                                            <input
+                                                type="number"
+                                                value={targetSys}
+                                                onChange={e => setTargetSys(e.target.value)}
+                                                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm"
+                                                required
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-sm text-slate-300">목표 이완기 (아래 혈압)</label>
+                                            <input
+                                                type="number"
+                                                value={targetDia}
+                                                onChange={e => setTargetDia(e.target.value)}
+                                                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm"
+                                                required
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {error && (
+                                        <p className="text-sm text-red-400 whitespace-pre-line">
+                                            {error}
+                                        </p>
+                                    )}
+                                    {success && (
+                                        <p className="text-sm text-emerald-400 whitespace-pre-line">
+                                            {success}
+                                        </p>
+                                    )}
+
+                                    <button
+                                        type="submit"
+                                        disabled={saving}
+                                        className="w-full px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold disabled:opacity-60"
+                                    >
+                                        {saving ? '저장 중...' : '목표 혈압 저장'}
+                                    </button>
+                                </form>
+
+                                <p className="text-[11px] text-slate-500">
+                                    ※ 이 값은 AI 코치가 참고하는 목표 범위일 뿐, 실제 진단 기준은 아니에요.
+                                    정확한 목표 혈압은 의료 전문가와 상의해 주세요.
+                                </p>
+                            </>
+                        )}
+                    </section>
+                )}
             </div>
         </main>
     );

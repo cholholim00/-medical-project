@@ -1,147 +1,143 @@
 // app/charts/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { getToken } from '@/lib/authStorage';
 import {
     LineChart,
     Line,
+    CartesianGrid,
     XAxis,
     YAxis,
-    CartesianGrid,
     Tooltip,
-    Legend,
+    ResponsiveContainer,
 } from 'recharts';
 
 const API_BASE =
     process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
 
-type HealthRecord = {
+type BPRecord = {
     id: number;
     datetime: string;
-    type: 'blood_pressure' | 'blood_sugar';
-    value1: number; // 수축기
-    value2?: number; // 이완기
-    state?: string | null;
-    memo?: string | null;
-    sleepHours?: number | null;
-    exercise?: boolean | null;
-    stressLevel?: number | null;
+    type: 'blood_pressure';
+    value1: number; // sys
+    value2?: number; // dia
 };
-
-type RangeOption = 7 | 14 | 30;
 
 type ChartPoint = {
     id: number;
-    datetime: string;
-    label: string; // 축에 찍힐 글자
+    dateLabel: string;
     sys: number;
     dia: number | null;
-    state?: string | null;
 };
 
 export default function ChartsPage() {
-    const [records, setRecords] = useState<HealthRecord[]>([]);
+    const router = useRouter();
+
+    const [data, setData] = useState<ChartPoint[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [rangeDays, setRangeDays] = useState<RangeOption>(14);
     const [needLogin, setNeedLogin] = useState(false);
+    const [rangeDays, setRangeDays] = useState<7 | 14 | 30>(7);
 
-    // ---- 백엔드에서 기록 가져오기 (로그인 필요 시 토큰 붙이기) ----
-    const fetchRecords = async (token: string) => {
+    const fetchData = async (token: string, days: number) => {
         try {
             setLoading(true);
             setError(null);
 
             const res = await fetch(
-                `${API_BASE}/api/records?type=blood_pressure`,
+                `${API_BASE}/api/records?type=blood_pressure&limit=500`,
                 {
                     headers: {
                         'Content-Type': 'application/json',
-                        Authorization: `Bearer ${token}`, // 💡 토큰 헤더
+                        Authorization: `Bearer ${token}`, // 🔐 토큰
                     },
                 },
             );
 
             if (!res.ok) {
-                throw new Error(`API error: ${res.status}`);
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || `records API error: ${res.status}`);
             }
 
-            const json = (await res.json()) as HealthRecord[];
+            const json = (await res.json()) as BPRecord[];
 
-            // 오래된 것 → 최근 순으로 정렬
-            const sorted = [...json].sort(
+            // 최근 N일 필터링
+            const now = new Date();
+            const from = new Date(
+                now.getTime() - days * 24 * 60 * 60 * 1000,
+            ).getTime();
+
+            const filtered = json.filter((r) => {
+                const t = new Date(r.datetime).getTime();
+                return t >= from;
+            });
+
+            // 오래된 것부터 보이게 정렬
+            const sorted = filtered.sort(
                 (a, b) =>
                     new Date(a.datetime).getTime() - new Date(b.datetime).getTime(),
             );
 
-            setRecords(sorted);
+            const mapped: ChartPoint[] = sorted.map((r) => {
+                const d = new Date(r.datetime);
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const dd = String(d.getDate()).padStart(2, '0');
+                const hh = String(d.getHours()).padStart(2, '0');
+                const mi = String(d.getMinutes()).padStart(2, '0');
+                return {
+                    id: r.id,
+                    dateLabel: `${mm}-${dd} ${hh}:${mi}`,
+                    sys: r.value1,
+                    dia:
+                        typeof r.value2 === 'number' && !Number.isNaN(r.value2)
+                            ? r.value2
+                            : null,
+                };
+            });
+
+            setData(mapped);
         } catch (err: any) {
-            setError(err.message ?? '알 수 없는 오류');
+            setError(err.message ?? '추이 데이터를 불러오는 중 오류가 발생했습니다.');
+            setData([]);
         } finally {
             setLoading(false);
         }
     };
 
-    // 마운트 시: 토큰 확인 후 불러오기
+    // 첫 로딩 시 로그인 체크 + 데이터 로드
     useEffect(() => {
-        if (typeof window === 'undefined') return;
-
         const token = getToken();
         if (!token) {
             setNeedLogin(true);
             setLoading(false);
             return;
         }
-
-        fetchRecords(token);
+        fetchData(token, rangeDays);
     }, []);
 
-    // 선택한 기간(rangeDays)에 해당하는 데이터만 필터링
-    const filteredRecords = useMemo(() => {
-        if (records.length === 0) return [];
-
-        const now = new Date();
-        const from = new Date();
-        from.setDate(now.getDate() - rangeDays);
-
-        return records.filter(
-            (r) => new Date(r.datetime).getTime() >= from.getTime(),
-        );
-    }, [records, rangeDays]);
-
-    // 차트에 들어갈 데이터로 가공
-    const chartData: ChartPoint[] = useMemo(() => {
-        return filteredRecords.map((r) => {
-            const d = new Date(r.datetime);
-            const label = `${String(d.getMonth() + 1).padStart(
-                2,
-                '0',
-            )}/${String(d.getDate()).padStart(2, '0')} ${String(
-                d.getHours(),
-            ).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-
-            return {
-                id: r.id,
-                datetime: r.datetime,
-                label,
-                sys: r.value1,
-                dia: typeof r.value2 === 'number' ? r.value2 : null,
-                state: r.state,
-            };
-        });
-    }, [filteredRecords]);
+    // rangeDays 변경 시 다시 로딩
+    useEffect(() => {
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setLoading(false);
+            return;
+        }
+        fetchData(token, rangeDays);
+    }, [rangeDays]);
 
     return (
         <main className="min-h-screen bg-slate-950 text-slate-100 flex justify-center">
-            <div className="w-full max-w-5xl p-6 space-y-6">
+            <div className="w-full max-w-4xl p-4 space-y-4">
                 {/* 헤더 */}
-                <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <header className="flex items-center justify-between gap-3">
                     <div>
-                        <h1 className="text-2xl font-bold">📈 혈압 추이 라인차트</h1>
-                        <p className="text-sm text-slate-300">
-                            최근 기간 동안의 혈압 변화를 시각화한 페이지야.
+                        <h1 className="text-xl font-bold">📈 혈압 추이 차트</h1>
+                        <p className="text-xs sm:text-sm text-slate-300">
+                            최근 일정 기간 동안의 수축기/이완기 변화를 한눈에 확인할 수 있어요.
                         </p>
                     </div>
                     <Link
@@ -152,17 +148,11 @@ export default function ChartsPage() {
                     </Link>
                 </header>
 
-                {/* (디버그용) 데이터 개수 표시 – 확인 후 마음에 안 들면 지워도 됨 */}
-                <section className="text-xs text-slate-500">
-                    <div>전체 records: {records.length}개</div>
-                    <div>차트에 쓰이는 데이터: {chartData.length}개</div>
-                </section>
-
-                {/* 로그인 필요 안내 */}
+                {/* 로그인 안내 */}
                 {needLogin ? (
                     <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
                         <p className="text-sm text-slate-300">
-                            혈압 추이 차트를 보려면 로그인이 필요합니다.
+                            혈압 추이 차트는 로그인 후에만 볼 수 있어요.
                         </p>
                         <div className="mt-3 flex gap-2">
                             <Link
@@ -182,141 +172,118 @@ export default function ChartsPage() {
                 ) : (
                     <>
                         {/* 기간 선택 */}
-                        <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                            <div className="text-sm text-slate-300">
-                                분석하고 싶은 기간을 선택하면, 그 범위 안에 있는 혈압 기록만
-                                차트로 보여줄게.
-                            </div>
-                            <div className="flex items-center gap-2 text-sm">
-                                <span className="text-slate-300">기간:</span>
-                                <select
-                                    value={rangeDays}
-                                    onChange={(e) =>
-                                        setRangeDays(Number(e.target.value) as RangeOption)
-                                    }
-                                    className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1 text-sm"
+                        <section className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <p className="text-xs sm:text-sm text-slate-300">
+                                보고 싶은 기간을 선택하면, 그 기간 안의 혈압만 차트에 표시돼요.
+                            </p>
+                            <div className="flex gap-2 text-xs">
+                                <button
+                                    type="button"
+                                    onClick={() => setRangeDays(7)}
+                                    className={`px-3 py-1 rounded-lg border ${
+                                        rangeDays === 7
+                                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-200'
+                                            : 'bg-slate-950 border-slate-700 text-slate-300'
+                                    }`}
                                 >
-                                    <option value={7}>최근 7일</option>
-                                    <option value={14}>최근 14일</option>
-                                    <option value={30}>최근 30일</option>
-                                </select>
+                                    최근 7일
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setRangeDays(14)}
+                                    className={`px-3 py-1 rounded-lg border ${
+                                        rangeDays === 14
+                                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-200'
+                                            : 'bg-slate-950 border-slate-700 text-slate-300'
+                                    }`}
+                                >
+                                    최근 14일
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setRangeDays(30)}
+                                    className={`px-3 py-1 rounded-lg border ${
+                                        rangeDays === 30
+                                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-200'
+                                            : 'bg-slate-950 border-slate-700 text-slate-300'
+                                    }`}
+                                >
+                                    최근 30일
+                                </button>
                             </div>
                         </section>
 
-                        {loading && <p>불러오는 중...</p>}
+                        {/* 로딩 / 에러 */}
+                        {loading && <p className="text-sm">불러오는 중...</p>}
                         {error && (
-                            <p className="text-red-400 text-sm">에러: {error}</p>
+                            <p className="text-sm text-red-400 whitespace-pre-line">
+                                에러: {error}
+                            </p>
                         )}
 
+                        {/* 차트 영역 */}
                         {!loading && !error && (
-                            <>
-                                {chartData.length === 0 ? (
-                                    <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                                        <p className="text-sm text-slate-300">
-                                            선택한 기간({rangeDays}일) 안에 혈압 기록이 없어요.
-                                            <br />
-                                            대시보드에서 샘플 데이터를 생성하거나, 직접 기록을
-                                            추가해보세요.
-                                        </p>
-                                    </section>
+                            <section className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                                {data.length === 0 ? (
+                                    <p className="text-sm text-slate-400">
+                                        선택한 기간 안에 혈압 기록이 없어요. 기록을 추가하거나 샘플
+                                        데이터를 생성해보세요.
+                                    </p>
                                 ) : (
-                                    <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                                        <h2 className="font-semibold mb-2">혈압 추이</h2>
-
-                                        <div className="w-full overflow-x-auto">
-                                            {/* 고정 크기 차트 – width/height를 명시해서 -1 에러 방지 */}
-                                            <div className="min-w-[720px]">
-                                                <LineChart
-                                                    width={720}
-                                                    height={320}
-                                                    data={chartData}
-                                                    margin={{
-                                                        top: 20,
-                                                        right: 30,
-                                                        left: 10,
-                                                        bottom: 20,
+                                    <div className="h-[260px] sm:h-[320px] w-full">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <LineChart data={data} margin={{ left: 4, right: 12 }}>
+                                                <CartesianGrid strokeDasharray="3 3" />
+                                                <XAxis
+                                                    dataKey="dateLabel"
+                                                    tick={{ fontSize: 10 }}
+                                                    angle={-30}
+                                                    textAnchor="end"
+                                                    height={50}
+                                                />
+                                                <YAxis
+                                                    tick={{ fontSize: 10 }}
+                                                    width={40}
+                                                    domain={['dataMin - 10', 'dataMax + 10']}
+                                                    unit=""
+                                                />
+                                                <Tooltip
+                                                    contentStyle={{
+                                                        backgroundColor: '#020617',
+                                                        borderColor: '#1e293b',
+                                                        fontSize: 12,
                                                     }}
-                                                >
-                                                    <CartesianGrid
-                                                        strokeDasharray="3 3"
-                                                        opacity={0.3}
-                                                    />
-                                                    <XAxis
-                                                        dataKey="label"
-                                                        tick={{ fontSize: 10, fill: '#cbd5f5' }}
-                                                        minTickGap={20}
-                                                    />
-                                                    <YAxis
-                                                        tick={{ fontSize: 10, fill: '#cbd5f5' }}
-                                                        domain={['auto', 'auto']}
-                                                        label={{
-                                                            value: 'mmHg',
-                                                            angle: -90,
-                                                            position: 'insideLeft',
-                                                            fill: '#cbd5f5',
-                                                            fontSize: 10,
-                                                        }}
-                                                    />
-                                                    <Tooltip
-                                                        contentStyle={{
-                                                            backgroundColor: '#020617',
-                                                            border: '1px solid #1e293b',
-                                                            borderRadius: 8,
-                                                            fontSize: 12,
-                                                        }}
-                                                        formatter={(value, name) => {
-                                                            if (name === 'sys')
-                                                                return [`${value} mmHg`, '수축기'];
-                                                            if (name === 'dia')
-                                                                return [`${value} mmHg`, '이완기'];
-                                                            return [value, name];
-                                                        }}
-                                                        labelFormatter={(label, payload) => {
-                                                            const p = payload?.[0]
-                                                                ?.payload as ChartPoint | undefined;
-                                                            return p
-                                                                ? `${label} (${p.state ?? 'state 없음'})`
-                                                                : label;
-                                                        }}
-                                                    />
-                                                    <Legend
-                                                        formatter={(value) =>
-                                                            value === 'sys'
-                                                                ? '수축기'
-                                                                : value === 'dia'
-                                                                    ? '이완기'
-                                                                    : value
-                                                        }
-                                                    />
-                                                    <Line
-                                                        type="monotone"
-                                                        dataKey="sys"
-                                                        stroke="#38bdf8"
-                                                        strokeWidth={2}
-                                                        dot={{ r: 2 }}
-                                                        name="수축기"
-                                                    />
-                                                    <Line
-                                                        type="monotone"
-                                                        dataKey="dia"
-                                                        stroke="#f97316"
-                                                        strokeWidth={2}
-                                                        dot={{ r: 2 }}
-                                                        name="이완기"
-                                                        connectNulls
-                                                    />
-                                                </LineChart>
-                                            </div>
-                                        </div>
-
-                                        <p className="mt-3 text-xs text-slate-400">
-                                            점 하나가 한 번의 측정을 의미해. 수축기(위값)와
-                                            이완기(아랫값)의 변화를 함께 볼 수 있어.
-                                        </p>
-                                    </section>
+                                                />
+                                                <Line
+                                                    type="monotone"
+                                                    dataKey="sys"
+                                                    name="수축기"
+                                                    stroke="#22c55e"
+                                                    strokeWidth={2}
+                                                    dot={{ r: 2 }}
+                                                    activeDot={{ r: 4 }}
+                                                />
+                                                <Line
+                                                    type="monotone"
+                                                    dataKey="dia"
+                                                    name="이완기"
+                                                    stroke="#38bdf8"
+                                                    strokeWidth={2}
+                                                    dot={{ r: 2 }}
+                                                    activeDot={{ r: 4 }}
+                                                />
+                                            </LineChart>
+                                        </ResponsiveContainer>
+                                    </div>
                                 )}
-                            </>
+                            </section>
                         )}
+
+                        <p className="text-[11px] text-slate-500">
+                            ※ 이 차트는 경향을 보는 용도이며, 의료적 진단이나 치료 지시가
+                            아닙니다. 수치가 지속적으로 높거나 불안하다면 반드시 의료
+                            전문가와 상담하세요.
+                        </p>
                     </>
                 )}
             </div>

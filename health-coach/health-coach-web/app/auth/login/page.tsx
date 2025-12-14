@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { getToken, setAuth } from '@/lib/authStorage';  // 🔹 authStorage 사용
+import { getToken, setAuth, type StoredUser } from '@/lib/authStorage';
 
 const API_BASE =
     process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
@@ -17,7 +17,7 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // 이미 로그인되어 있으면 / 로 보내기
+    // 이미 로그인 되어 있으면 / 로 보내기
     useEffect(() => {
         const token = getToken();
         if (token) {
@@ -44,10 +44,9 @@ export default function LoginPage() {
 
             const json = (await res.json()) as {
                 token: string;
-                user: { id: number; email: string; name?: string | null };
+                user: StoredUser;
             };
 
-            // 🔹 여기서 공통 유틸로 토큰 + 유저 저장
             setAuth(json.token, json.user);
 
             router.push('/');

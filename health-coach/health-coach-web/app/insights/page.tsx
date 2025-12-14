@@ -5,27 +5,35 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getToken } from '@/lib/authStorage';
 
-const API_BASE =
-    process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:4000';
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:5001';
 
-type LifestyleGroup = {
-    label: string;
+type GroupStats = {
     count: number;
     avg_sys: number | null;
     avg_dia: number | null;
 };
 
-type LifestyleStatsResponse = {
+type LifestyleStats = {
     rangeDays: number;
-    sleepGroups: LifestyleGroup[];
-    exerciseGroups: LifestyleGroup[];
-    stressGroups: LifestyleGroup[];
+    sleep: {
+        short: GroupStats;
+        enough: GroupStats;
+    };
+    exercise: {
+        yes: GroupStats;
+        no: GroupStats;
+    };
+    stress: {
+        low: GroupStats;
+        mid: GroupStats;
+        high: GroupStats;
+    };
 };
 
 export default function InsightsPage() {
-    const [rangeDays, setRangeDays] = useState<30 | 60>(30);
-
-    const [stats, setStats] = useState<LifestyleStatsResponse | null>(null);
+    const [needLogin, setNeedLogin] = useState(false);
+    const [rangeDays, setRangeDays] = useState<7 | 14 | 30>(30);
+    const [stats, setStats] = useState<LifestyleStats | null>(null);
     const [loadingStats, setLoadingStats] = useState(true);
     const [statsError, setStatsError] = useState<string | null>(null);
 
@@ -33,9 +41,6 @@ export default function InsightsPage() {
     const [aiLoading, setAiLoading] = useState(false);
     const [aiError, setAiError] = useState<string | null>(null);
 
-    const [needLogin, setNeedLogin] = useState(false);
-
-    // 🔹 라이프스타일 통계 불러오기 (토큰 필요)
     const fetchStats = async (token: string, days: number) => {
         try {
             setLoadingStats(true);
@@ -52,24 +57,20 @@ export default function InsightsPage() {
             );
 
             if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                throw new Error(
-                    err.error || `lifestyle stats API error: ${res.status}`,
-                );
+                throw new Error(`lifestyle stats API error: ${res.status}`);
             }
 
-            const json = (await res.json()) as LifestyleStatsResponse;
+            const json = await res.json() as LifestyleStats;
             setStats(json);
         } catch (err: any) {
             setStatsError(
-                err.message ?? '라이프스타일 인사이트 데이터를 불러오는 중 오류가 발생했습니다.',
+                err.message ?? '라이프스타일 인사이트를 불러오는 중 오류가 발생했습니다.',
             );
         } finally {
             setLoadingStats(false);
         }
     };
 
-    // 🔹 첫 진입 / 기간 변경 시 토큰 확인 + 데이터 호출
     useEffect(() => {
         if (typeof window === 'undefined') return;
 
@@ -81,17 +82,27 @@ export default function InsightsPage() {
         }
 
         fetchStats(token, rangeDays);
-    }, [rangeDays]);
+    }, []);
 
-    // 🔹 AI 인사이트 요청
-    const handleAskInsight = async () => {
+    useEffect(() => {
+        if (needLogin) return;
+        const token = getToken();
+        if (!token) {
+            setNeedLogin(true);
+            setLoadingStats(false);
+            return;
+        }
+        fetchStats(token, rangeDays);
+    }, [rangeDays, needLogin]);
+
+    const handleAskInsights = async () => {
         setAiError(null);
         setAiMessage(null);
 
         const token = getToken();
         if (!token) {
             setNeedLogin(true);
-            setAiError('AI 인사이트를 사용하려면 로그인이 필요합니다.');
+            setAiError('AI 인사이트를 보려면 로그인해야 합니다.');
             return;
         }
 
@@ -109,223 +120,234 @@ export default function InsightsPage() {
 
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                throw new Error(
-                    err.error || `AI lifestyle API error: ${res.status}`,
-                );
+                throw new Error(err.error || `AI 인사이트 호출 실패: ${res.status}`);
             }
 
-            const json = (await res.json()) as {
-                aiMessage?: string;
-                message?: string;
-            };
-
+            const json = await res.json() as { aiMessage?: string; message?: string };
             setAiMessage(json.aiMessage ?? json.message ?? '(응답 본문 없음)');
         } catch (err: any) {
-            setAiError(
-                err.message ?? 'AI 인사이트 요청 중 오류가 발생했습니다.',
-            );
+            setAiError(err.message ?? 'AI 인사이트 호출 중 오류가 발생했습니다.');
         } finally {
             setAiLoading(false);
         }
     };
 
-    // 공통 테이블 렌더링 컴포넌트
-    const renderGroupTable = (title: string, groups: LifestyleGroup[]) => {
-        if (!groups || groups.length === 0) {
-            return (
-                <p className="text-sm text-slate-400">
-                    해당 항목에 대한 데이터가 아직 없습니다.
-                </p>
-            );
-        }
-
-        return (
-            <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
-                    <thead>
-                    <tr className="bg-slate-800">
-                        <th className="border border-slate-700 px-2 py-1 text-left">
-                            {title}
-                        </th>
-                        <th className="border border-slate-700 px-2 py-1">측정 횟수</th>
-                        <th className="border border-slate-700 px-2 py-1">
-                            평균 혈압 (수축기 / 이완기)
-                        </th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    {groups.map((g) => (
-                        <tr key={g.label}>
-                            <td className="border border-slate-800 px-2 py-1 whitespace-nowrap">
-                                {g.label}
-                            </td>
-                            <td className="border border-slate-800 px-2 py-1 text-center">
-                                {g.count}회
-                            </td>
-                            <td className="border border-slate-800 px-2 py-1 text-center">
-                                {g.avg_sys !== null && g.avg_dia !== null
-                                    ? `${Math.round(g.avg_sys)} / ${Math.round(g.avg_dia)} mmHg`
-                                    : '데이터 없음'}
-                            </td>
-                        </tr>
-                    ))}
-                    </tbody>
-                </table>
-            </div>
-        );
-    };
+    const renderGroupRow = (label: string, g: GroupStats) => (
+        <tr key={label}>
+            <td className="border border-slate-800 px-2 py-1 text-xs">{label}</td>
+            <td className="border border-slate-800 px-2 py-1 text-xs text-center">
+                {g.count}
+            </td>
+            <td className="border border-slate-800 px-2 py-1 text-xs text-center">
+                {g.avg_sys != null && g.avg_dia != null
+                    ? `${Math.round(g.avg_sys)} / ${Math.round(g.avg_dia)}`
+                    : '-'}
+            </td>
+        </tr>
+    );
 
     return (
         <main className="min-h-screen bg-slate-950 text-slate-100 flex justify-center">
-            <div className="w-full max-w-4xl p-6 space-y-6">
-                {/* 헤더 */}
-                <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="w-full max-w-5xl p-6 space-y-6">
+                <header className="flex items-center justify-between gap-3">
                     <div>
                         <h1 className="text-2xl font-bold">📊 라이프스타일 인사이트</h1>
                         <p className="text-sm text-slate-300">
-                            수면, 운동, 스트레스 패턴에 따라 혈압이 어떻게 달라지는지 확인할 수 있어요.
+                            수면·운동·스트레스와 혈압 사이의 관계를 통계와 AI 코멘트로 확인해요.
                         </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex gap-2">
                         <Link
                             href="/"
-                            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold"
+                            className="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold"
                         >
                             ⬅ 대시보드로
                         </Link>
                     </div>
                 </header>
 
-                {/* 로그인 필요 안내 */}
-                {needLogin && (
-                    <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+                {needLogin ? (
+                    <section className="p-4 rounded-xl bg-slate-900 border border-slate-800">
                         <p className="text-sm text-slate-300">
-                            이 페이지는 내 기록을 기반으로 인사이트를 보여주기 때문에 로그인이 필요해요.
+                            라이프스타일 인사이트는 로그인 후에 볼 수 있어요.
                         </p>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="mt-3 flex gap-2">
                             <Link
                                 href="/auth/login"
-                                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-xs font-semibold"
+                                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-sm font-semibold"
                             >
-                                로그인 하러 가기
+                                로그인 하기
                             </Link>
                             <Link
                                 href="/auth/register"
-                                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-xs font-semibold"
+                                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-sm font-semibold"
                             >
                                 회원가입
                             </Link>
                         </div>
-                        {statsError && (
-                            <p className="text-xs text-red-400 whitespace-pre-line">
-                                {statsError}
+                        {aiError && (
+                            <p className="mt-3 text-xs text-red-400 whitespace-pre-line">
+                                {aiError}
                             </p>
                         )}
                     </section>
-                )}
-
-                {/* 로그인 되어 있을 때만 본문 표시 */}
-                {!needLogin && (
+                ) : (
                     <>
-                        {/* 기간 선택 + 요약 */}
-                        <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                                <div className="text-sm text-slate-300">
-                                    최근 일정 기간 동안의 수면/운동/스트레스 패턴과 혈압 관계를 분석해요.
-                                </div>
-                                <div className="flex items-center gap-2 text-sm">
+                        {/* 통계 표 영역 */}
+                        <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-4">
+                            <div className="flex items-center justify-between text-sm">
+                                <div className="flex items-center gap-2">
                                     <span className="text-slate-300">분석 기간:</span>
                                     <select
                                         value={rangeDays}
-                                        onChange={(e) =>
-                                            setRangeDays(Number(e.target.value) as 30 | 60)
+                                        onChange={e =>
+                                            setRangeDays(Number(e.target.value) as 7 | 14 | 30)
                                         }
                                         className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1 text-sm"
                                     >
+                                        <option value={7}>최근 7일</option>
+                                        <option value={14}>최근 14일</option>
                                         <option value={30}>최근 30일</option>
-                                        <option value={60}>최근 60일</option>
                                     </select>
                                 </div>
                             </div>
 
-                            {loadingStats && (
-                                <p className="text-sm text-slate-400">통계를 불러오는 중...</p>
-                            )}
-                            {statsError && (
-                                <p className="text-sm text-red-400 whitespace-pre-line">
+                            {loadingStats ? (
+                                <p className="text-xs text-slate-300">통계를 불러오는 중...</p>
+                            ) : statsError ? (
+                                <p className="text-xs text-red-400 whitespace-pre-line">
                                     {statsError}
                                 </p>
-                            )}
-                            {!loadingStats && !statsError && !stats && (
-                                <p className="text-sm text-slate-400">
-                                    아직 라이프스타일 데이터가 없습니다. 기록 추가 후 다시 확인해 주세요.
+                            ) : stats ? (
+                                <div className="space-y-4 text-xs">
+                                    {/* 수면 */}
+                                    <div>
+                                        <h2 className="text-sm font-semibold mb-1">
+                                            😴 수면 시간 vs 혈압
+                                        </h2>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full border-collapse">
+                                                <thead>
+                                                <tr className="bg-slate-800">
+                                                    <th className="border border-slate-700 px-2 py-1 text-left">
+                                                        구분
+                                                    </th>
+                                                    <th className="border border-slate-700 px-2 py-1">
+                                                        측정 횟수
+                                                    </th>
+                                                    <th className="border border-slate-700 px-2 py-1">
+                                                        평균 혈압 (수축기/이완기)
+                                                    </th>
+                                                </tr>
+                                                </thead>
+                                                <tbody>
+                                                {renderGroupRow('6시간 미만 수면', stats.sleep.short)}
+                                                {renderGroupRow('6시간 이상 수면', stats.sleep.enough)}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    {/* 운동 */}
+                                    <div>
+                                        <h2 className="text-sm font-semibold mb-1">
+                                            🏃 운동 여부 vs 혈압
+                                        </h2>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full border-collapse">
+                                                <thead>
+                                                <tr className="bg-slate-800">
+                                                    <th className="border border-slate-700 px-2 py-1 text-left">
+                                                        구분
+                                                    </th>
+                                                    <th className="border border-slate-700 px-2 py-1">
+                                                        측정 횟수
+                                                    </th>
+                                                    <th className="border border-slate-700 px-2 py-1">
+                                                        평균 혈압 (수축기/이완기)
+                                                    </th>
+                                                </tr>
+                                                </thead>
+                                                <tbody>
+                                                {renderGroupRow('운동한 날', stats.exercise.yes)}
+                                                {renderGroupRow('운동하지 않은 날', stats.exercise.no)}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    {/* 스트레스 */}
+                                    <div>
+                                        <h2 className="text-sm font-semibold mb-1">
+                                            😵 스트레스 vs 혈압
+                                        </h2>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full border-collapse">
+                                                <thead>
+                                                <tr className="bg-slate-800">
+                                                    <th className="border border-slate-700 px-2 py-1 text-left">
+                                                        구분
+                                                    </th>
+                                                    <th className="border border-slate-700 px-2 py-1">
+                                                        측정 횟수
+                                                    </th>
+                                                    <th className="border border-slate-700 px-2 py-1">
+                                                        평균 혈압 (수축기/이완기)
+                                                    </th>
+                                                </tr>
+                                                </thead>
+                                                <tbody>
+                                                {renderGroupRow('스트레스 낮음 (1~2)', stats.stress.low)}
+                                                {renderGroupRow('스트레스 보통 (3)', stats.stress.mid)}
+                                                {renderGroupRow('스트레스 높음 (4~5)', stats.stress.high)}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <p className="text-xs text-slate-400">
+                                    아직 라이프스타일 인사이트를 계산할 수 있는 데이터가 충분하지 않습니다.
+                                    수면·운동·스트레스 정보를 포함해서 기록을 조금 더 쌓아 주세요.
                                 </p>
                             )}
                         </section>
 
-                        {/* 통계 테이블들 */}
-                        {stats && (
-                            <section className="space-y-4">
-                                {/* 수면 */}
-                                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                                    <h2 className="font-semibold">😴 수면 시간 vs 혈압</h2>
-                                    <p className="text-xs text-slate-400">
-                                        예: 6시간 미만 / 6시간 이상 그룹으로 나눠서 혈압 차이를 봅니다.
-                                    </p>
-                                    {renderGroupTable('수면 그룹', stats.sleepGroups)}
-                                </div>
-
-                                {/* 운동 */}
-                                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                                    <h2 className="font-semibold">🏃 운동 여부 vs 혈압</h2>
-                                    <p className="text-xs text-slate-400">
-                                        운동한 날과 운동하지 않은 날의 평균 혈압 차이를 비교합니다.
-                                    </p>
-                                    {renderGroupTable('운동 여부', stats.exerciseGroups)}
-                                </div>
-
-                                {/* 스트레스 */}
-                                <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                                    <h2 className="font-semibold">🧠 스트레스 수준 vs 혈압</h2>
-                                    <p className="text-xs text-slate-400">
-                                        스트레스 지수(1~5)를 낮음/중간/높음으로 나누어 혈압 경향을 봅니다.
-                                    </p>
-                                    {renderGroupTable('스트레스 수준', stats.stressGroups)}
-                                </div>
-                            </section>
-                        )}
-
-                        {/* AI 인사이트 섹션 */}
+                        {/* AI 인사이트 영역 */}
                         <section className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-                            <div className="flex items-center justify-between gap-2">
-                                <h2 className="font-semibold">🧠 AI 라이프스타일 인사이트</h2>
-                                <button
-                                    type="button"
-                                    onClick={handleAskInsight}
-                                    disabled={aiLoading || loadingStats || !!statsError}
-                                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-semibold disabled:opacity-60"
-                                >
-                                    {aiLoading
-                                        ? 'AI가 분석 중...'
-                                        : 'AI에게 패턴 분석 요청하기'}
-                                </button>
+                            <div className="flex items-center justify-between">
+                                <h2 className="text-sm font-semibold">
+                                    🧠 AI 라이프스타일 인사이트
+                                </h2>
                             </div>
+                            <p className="text-xs text-slate-300">
+                                위 통계를 바탕으로, 수면·운동·스트레스와 혈압 사이의 경향을 조심스럽게 분석해 드려요.
+                            </p>
 
                             {aiError && (
-                                <p className="text-sm text-red-400 whitespace-pre-line">
+                                <p className="text-xs text-red-400 whitespace-pre-line">
                                     {aiError}
                                 </p>
                             )}
 
+                            <button
+                                type="button"
+                                onClick={handleAskInsights}
+                                disabled={aiLoading}
+                                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs font-semibold disabled:opacity-60"
+                            >
+                                {aiLoading ? 'AI 인사이트 분석 중...' : 'AI 인사이트 받기'}
+                            </button>
+
                             {aiMessage && (
-                                <div className="mt-2 p-4 rounded-xl bg-slate-950 border border-slate-800 text-sm whitespace-pre-line">
+                                <div className="mt-3 p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs whitespace-pre-line">
                                     {aiMessage}
                                 </div>
                             )}
 
-                            <p className="mt-2 text-[11px] text-slate-500">
-                                ※ 이 코멘트는 생활 습관 참고용으로 제공되며, 의료적 진단이나 치료 지시가
-                                아닙니다. 걱정되는 수치가 계속된다면 반드시 의료 전문가와 상담하세요.
+                            <p className="text-[11px] text-slate-500">
+                                ※ 이 분석은 통계를 바탕으로 한 참고용 설명이며, 인과관계를 단정하지 않습니다.
+                                건강 관련 결정은 반드시 의료 전문가와 상의해 주세요.
                             </p>
                         </section>
                     </>
