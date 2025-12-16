@@ -12,39 +12,36 @@ import aiRouter from './routes/ai';
 console.log('🚀 health-coach backend STARTED (server.ts 로딩됨)');
 
 const app = express();
-const PORT = 5001;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 5001;
 
+// 공통 미들웨어
 app.use(cors());
 app.use(express.json());
 
-// 🔹 0. 이 서버가 맞는지 확인용 라우트
+// ✅ 헬스 체크
+app.get('/health-check', (_req, res) => {
+    res.json({ status: 'ok', message: 'health-coach API is running' });
+});
+
+// ✅ 이 서버가 맞는지 확인용
 app.get('/__test', (req, res) => {
     res.json({
         ok: true,
-        msg: 'this is health-coach-backend on port 5001',
+        msg: 'this is health-coach-backend on port ' + PORT,
         url: req.url,
     });
 });
 
-// 🔹 1. 헬스 체크
-app.get('/health-check', (req, res) => {
-    res.json({ status: 'ok', message: 'health-coach API is running' });
-});
-
-// ✅ 2. 라우터 연결
-// 인증
+// ✅ 실제 API 라우터들
 app.use('/api/auth', authRouter);
-
-// 건강 기록 / 사용자 / AI 코치
-// -> /api/records 안에서 requireAuth 써서 보호
 app.use('/api/records', recordsRouter);
 app.use('/api/user', userRouter);
 app.use('/api/ai', aiRouter);
 
-// (선택) 404 로깅 + 응답
-app.use((req, res, next) => {
+// (선택) 404 로깅 (맨 마지막)
+app.use((req, _res, next) => {
     console.log('⚠️  404 Not Found:', req.method, req.url);
-    res.status(404).json({ error: 'Not found' });
+    next();
 });
 
 app.listen(PORT, () => {
