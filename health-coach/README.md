@@ -92,6 +92,7 @@ model AiCoachLog {
 
   user      User       @relation(fields: [userId], references: [id])
 }
+```
 # 🩺 AI 혈압 코치 대시보드 (Health Coach Web & API)
 
 개인 혈압·혈당 기록을 모아서 **대시보드, AI 코치, 라이프스타일 인사이트, 코칭 히스토리**까지 제공하는
@@ -186,3 +187,4 @@ model AiCoachLog {
 
   user      User       @relation(fields: [userId], references: [id])
 }
+```
