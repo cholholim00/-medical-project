@@ -310,13 +310,16 @@ export default function Home() {
                                 📈 혈압 추이 차트
                             </Link>
                             <Link href="/settings" className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-xs md:text-sm font-semibold shadow-sm">
-                                🎯 목표 혈압 & 계정 설정
+                                🎯 목표 혈압설정
                             </Link>
                             <Link href="/records" className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs md:text-sm font-semibold shadow-sm">
                                 📋 전체 기록 관리
                             </Link>
                             <Link href="/insights" className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-xs md:text-sm font-semibold shadow-sm">
                                 📊 라이프스타일 인사이트
+                            </Link>
+                            <Link href="/account" className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-sm font-semibold border border-slate-600">
+                                👤 계정 관리
                             </Link>
                         </div>
                     </div>
